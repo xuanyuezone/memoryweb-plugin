@@ -49,6 +49,21 @@ OLLAMA_HOST=http://localhost:11434
 MEMORYWEB_EMBED_MODEL=bge-m3-8k
 ```
 
+### Embedding model
+
+`bge-m3-8k` is a local alias for the public [bge-m3](https://ollama.com/library/bge-m3)
+embedding model with its 8k context window baked in, so embedding calls need no runtime
+options. Build it from the public model:
+
+```bash
+ollama pull bge-m3
+printf 'FROM bge-m3\nPARAMETER num_ctx 8192\n' > Modelfile
+ollama create bge-m3-8k -f Modelfile
+```
+
+Any other Ollama embedding model works too — point `MEMORYWEB_EMBED_MODEL` at it; a
+database must keep using the model it was built with (dimensions must match).
+
 ## Migrating from a native config block
 
 On a host that already runs memoryweb via `mcp_servers.memoryweb` in `config.yaml`, native
