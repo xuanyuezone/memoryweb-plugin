@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "memoryweb": {
+      "type": "stdio",
+      "command": "memoryweb",
+      "env": {
+        "MEMORYWEB_DB": "${MEMORYWEB_DB}",
+        "OLLAMA_HOST": "${OLLAMA_HOST}",
+        "MEMORYWEB_EMBED_MODEL": "${MEMORYWEB_EMBED_MODEL}"
+      }
+    }
+  }
+}
