@@ -78,6 +78,17 @@ ollama create bge-m3-8k -f Modelfile
 Any other Ollama embedding model works too — point `MEMORYWEB_EMBED_MODEL` at it; a
 database must keep using the model it was built with (dimensions must match).
 
+## Memory provider module (optional)
+
+Besides the portable MCP package, this repository ships a native
+**MemoryProvider** implementation in [`provider/`](provider/README.md): activate
+it with `memory.provider: memoryweb` to make the graph the agent's memory
+backend — live `memoryweb_*` tools through the provider tool surface, a domain
+snapshot in the system prompt, background semantic recall between turns,
+transient session traces via `sync_turn`, and fail-closed pre-compression
+checkpoints (`compression.checkpoint_required: true` supported). The two modules
+are independent; either or both can be installed.
+
 ## Migrating from a native config block
 
 On a host that already runs memoryweb via `mcp_servers.memoryweb` in `config.yaml`, native
