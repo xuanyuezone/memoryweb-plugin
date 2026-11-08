@@ -1,0 +1,6 @@
+# Test fixtures are rebuilt on demand (see tests/make_demo_db.py); the demo
+# database and memoryweb's stats sidecars never belong in version control.
+tests/data/
+
+__pycache__/
+*.pyc
