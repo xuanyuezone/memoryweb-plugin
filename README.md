@@ -16,6 +16,20 @@ names a hand-written `mcp_servers.memoryweb` config block produces.
 - The `memoryweb` binary on `PATH` for the user Hermes runs as (stdio server commands must
   be a bare executable token, so an absolute path cannot be declared in `mcp.json`).
 
+## Getting the memoryweb binary
+
+This package wraps an existing `memoryweb` MCP server; it ships no server code.
+Build or download one from the upstream project:
+
+```bash
+git clone https://github.com/corbym/memoryweb.git
+cd memoryweb && go build -o memoryweb .
+install -Dm755 memoryweb ~/.local/bin/memoryweb   # any dir on PATH works
+```
+
+Prebuilt binaries may also be attached to upstream releases. Verify with
+`memoryweb --version` before enabling the plugin.
+
 ## Install
 
 ```bash
