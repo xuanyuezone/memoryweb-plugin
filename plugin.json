@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "memoryweb",
+  "version": "0.1.0",
+  "description": "Connect Hermes Agent to a local memoryweb memory-graph server over the Model Context Protocol (stdio): domains, nodes, edges, orient/search/recall, audits and significance.",
+  "author": {
+    "name": "xuanyuezone",
+    "url": "https://github.com/xuanyuezone"
+  },
+  "homepage": "https://github.com/xuanyuezone/memoryweb-plugin",
+  "repository": "https://github.com/xuanyuezone/memoryweb-plugin",
+  "license": "MIT",
+  "keywords": [
+    "memoryweb",
+    "mcp",
+    "memory",
+    "memory-graph",
+    "stdio"
+  ]
+}
