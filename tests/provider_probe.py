@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 CHECKS: list[tuple[str, bool, str]] = []
 
@@ -161,6 +162,42 @@ def main() -> int:
     provider.shutdown()
     check("shutdown closes the server cleanly",
           getattr(provider, "_server", "missing") is None)
+
+    # 9) version single-source (#7): the provider surfaces plugin.json's version
+    import importlib
+    mod = importlib.import_module(type(provider).__module__)
+    declared = json.loads((Path(str(provider_dir)) / "plugin.json").read_text())["version"]
+    check("version single-source: PROVIDER_VERSION reads plugin.json",
+          getattr(mod, "PROVIDER_VERSION", "?") == declared,
+          f"provider={getattr(mod, 'PROVIDER_VERSION', '?')} plugin.json={declared}")
+
+    # 10) graph-domain overrides (#8): a fresh instance under custom domains
+    _domain_vars = ("MEMORYWEB_DOMAIN_MEMORY", "MEMORYWEB_DOMAIN_SESSIONS")
+    _saved = {k: os.environ.get(k) for k in _domain_vars}
+    try:
+        os.environ["MEMORYWEB_DOMAIN_MEMORY"] = "custom/mirror"
+        os.environ["MEMORYWEB_DOMAIN_SESSIONS"] = "custom/traces"
+        provider2 = load_memory_provider("memoryweb")
+        if provider2 is None:
+            check("domain overrides: second provider instance loads", False, "(load returned None)")
+        else:
+            provider2.initialize("probe-domains", hermes_home=hermes_home,
+                                 platform="probe", agent_context="primary")
+            provider2.sync_turn("q", "a", session_id="probe-domains")
+            provider2.on_memory_write("add", "memory", "Domain override smoke entry.", None)
+            time.sleep(3)
+            doms = json.loads(provider2.handle_tool_call("memoryweb_domains", {"action": "list"}))
+            dom_list = [str(d) for d in (doms.get("result") or {}).get("domains") or []]
+            check("domain overrides land in the configured graph domains",
+                  "custom/mirror" in dom_list and "custom/traces" in dom_list,
+                  ", ".join(dom_list))
+            provider2.shutdown()
+    finally:
+        for k, v in _saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     failed = [name for name, ok, _ in CHECKS if not ok]
     print(f"\n{len(CHECKS) - len(failed)}/{len(CHECKS)} checks passed")

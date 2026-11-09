@@ -95,6 +95,22 @@ manifest.
 `memory.provider: memoryweb` is set independently of the portable package's
 enable state (a memory provider activates through `memory.provider` alone).
 
+Provider environment (all optional):
+
+| Variable | Default when unset |
+|---|---|
+| `MEMORYWEB_BIN` | PATH, then `~/.local/bin/`, `/usr/local/bin/`, `/opt/mcp/memoryweb/` |
+| `MEMORYWEB_DB` | `<hermes_home>/.memoryweb.db` |
+| `OLLAMA_HOST` | server default (`http://localhost:11434`) |
+| `MEMORYWEB_EMBED_MODEL` | server default model |
+| `MEMORYWEB_DOMAIN_MEMORY` | `hermes/memory` (mirror domain for built-in `target='memory'` writes) |
+| `MEMORYWEB_DOMAIN_USER` | `user-profile` (mirror domain for `target='user'` writes) |
+| `MEMORYWEB_DOMAIN_SESSIONS` | `hermes/sessions` (transient session-trace domain) |
+
+The domain overrides are read per provider instance at `initialize`; the
+environment is process-wide, so a multiplexed gateway serving several profiles
+shares one mapping.
+
 > **Migrating a hand-copied provider** (layouts before the root merge kept the
 > provider in `provider/`): remove the manually flattened files first —
 > `rm ~/.hermes/plugins/memoryweb/{__init__.py,plugin.yaml,static_tools.json}`

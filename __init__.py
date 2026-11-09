@@ -44,8 +44,19 @@ from agent.memory_provider import (
 
 TOOL_PREFIX = "memoryweb_"
 PROTOCOL_VERSION = "2025-06-18"
-TRACE_DOMAIN = "hermes/sessions"
+DEFAULT_TRACE_DOMAIN = "hermes/sessions"
+DEFAULT_MIRROR_DOMAINS = {"memory": "hermes/memory", "user": "user-profile"}
 _CHECKPOINT_DIRNAME = "memoryweb-checkpoints"
+
+# Graph-domain overrides (unset = defaults above). Env-based so any deployment
+# can fold mirrors into existing domains or isolate multi-instance hosts; note
+# the environment is process-wide, so a multiplexed gateway serving several
+# profiles shares one mapping — per-profile splits need separate processes (#8).
+_DOMAIN_ENV = {
+    "memory": "MEMORYWEB_DOMAIN_MEMORY",
+    "user": "MEMORYWEB_DOMAIN_USER",
+    "sessions": "MEMORYWEB_DOMAIN_SESSIONS",
+}
 
 # Frozen tool table (name/description/inputSchema from memoryweb v1.65.0's
 # tools/list, see static_tools.json). MemoryManager builds its dispatch routing
@@ -237,6 +248,8 @@ class MemorywebMemoryProvider(MemoryProvider):
         self._prompt_block = ""
         self._tools: list[dict[str, Any]] = []
         self._trace_label = ""
+        self._trace_domain = DEFAULT_TRACE_DOMAIN
+        self._domains = dict(DEFAULT_MIRROR_DOMAINS)
         self._turn_count = 0
         self._prefetch_cache: dict[str, str] = {}
         self._last_recall_count = 0
@@ -280,6 +293,16 @@ class MemorywebMemoryProvider(MemoryProvider):
         for var in _PASSTHROUGH_ENV:
             if os.environ.get(var):
                 child_env[var] = os.environ[var]
+
+        # graph-domain overrides, resolved per instance at initialize (#8)
+        self._domains = dict(DEFAULT_MIRROR_DOMAINS)
+        for target, env_name in _DOMAIN_ENV.items():
+            value = os.environ.get(env_name, "").strip()
+            if value:
+                if target == "sessions":
+                    self._trace_domain = value
+                else:
+                    self._domains[target] = value
 
         self._server = _StdioServer(command, child_env)
         self._server.start()
@@ -384,7 +407,7 @@ class MemorywebMemoryProvider(MemoryProvider):
                     "id": nodes[0]["id"], "description": description})
             else:
                 self._call("remember", {
-                    "domain": TRACE_DOMAIN, "label": label,
+                    "domain": self._trace_domain, "label": label,
                     "description": description,
                     "why_matters": "Session activity visibility for history/dream cycles.",
                     "node_kind": "transient", "tags": "session-trace auto"})
@@ -434,8 +457,6 @@ class MemorywebMemoryProvider(MemoryProvider):
 
     # -- built-in write mirroring (on_memory_write) ----------------------------
 
-    _MIRROR_DOMAINS = {"memory": "hermes/memory", "user": "user-profile"}
-
     @staticmethod
     def _mirror_label(target: str, content: str) -> str:
         first_line = next((ln.strip() for ln in (content or "").splitlines() if ln.strip()), "")
@@ -468,7 +489,7 @@ class MemorywebMemoryProvider(MemoryProvider):
             name="memoryweb-mirror-write").start()
 
     def _mirror_write(self, action: str, target: str, content: str, metadata: dict[str, Any]) -> None:
-        domain = self._MIRROR_DOMAINS.get(target, "hermes/memory")
+        domain = self._domains.get(target, DEFAULT_MIRROR_DOMAINS["memory"])
         try:
             if action == "remove":
                 previous = metadata.get("previous_content") or ""
