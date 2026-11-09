@@ -24,10 +24,12 @@ Restart Hermes. The plugin loader discovers `$HERMES_HOME/plugins/memoryweb/`
 
 ## Environment
 
-Same three variables as the portable package, all optional:
+Same three variables as the portable package, all optional, plus a binary
+override:
 
 | Variable | Provider default when unset |
 |---|---|
+| `MEMORYWEB_BIN` | resolved via PATH, then `~/.local/bin/`, `/usr/local/bin/`, `/opt/mcp/memoryweb/` (gateway cold start can ask before boot-time PATH augmentation lands) |
 | `MEMORYWEB_DB` | `<hermes_home>/.memoryweb.db` |
 | `OLLAMA_HOST` | server default (`http://localhost:11434`) |
 | `MEMORYWEB_EMBED_MODEL` | server default model |

@@ -70,6 +70,34 @@ def _load_static_tools() -> list[dict[str, Any]]:
 # provider's own environment (never required; the server has its own defaults).
 _PASSTHROUGH_ENV = ("OLLAMA_HOST", "MEMORYWEB_EMBED_MODEL")
 
+# Resolution order for the server binary: explicit override, PATH, then
+# well-known install locations. Gateway cold start can run the first agent
+# init before the boot-time PATH augmentation reaches this process (#4), so
+# PATH alone is not a stable contract at that moment; the fallbacks make
+# availability independent of when the provider is first asked.
+_COMMAND_CANDIDATES = (
+    "~/.local/bin/memoryweb",
+    "/usr/local/bin/memoryweb",
+    "/opt/mcp/memoryweb/memoryweb",
+)
+
+
+def _resolve_command() -> str:
+    override = os.environ.get("MEMORYWEB_BIN", "").strip()
+    if override:
+        expanded = os.path.expanduser(override)
+        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
+            return expanded
+        return ""
+    found = shutil.which("memoryweb")
+    if found:
+        return found
+    for candidate in _COMMAND_CANDIDATES:
+        expanded = os.path.expanduser(candidate)
+        if os.path.isfile(expanded) and os.access(expanded, os.X_OK):
+            return expanded
+    return ""
+
 
 class _StdioServer:
     """One long-lived, thread-safe JSON-RPC conversation with the memoryweb
@@ -204,18 +232,19 @@ class MemorywebMemoryProvider(MemoryProvider):
         return "memoryweb"
 
     def is_available(self) -> bool:
-        """Binary resolvable on PATH; no network, no DB touch."""
-        return shutil.which("memoryweb") is not None
+        """Binary resolvable (override/PATH/known locations); no network, no DB touch."""
+        return bool(_resolve_command())
 
     def unavailable_reason(self) -> str:
-        return ("memoryweb binary not found on PATH — install it (or symlink it, "
-                "e.g. /usr/local/bin/memoryweb) to activate this provider.")
+        return ("memoryweb binary not found — set MEMORYWEB_BIN, put it on PATH, or "
+                "install it under ~/.local/bin, /usr/local/bin or /opt/mcp/memoryweb "
+                "to activate this provider.")
 
     def initialize(self, session_id: str, **kwargs) -> None:
         hermes_home = str(kwargs.get("hermes_home") or "")
         if not hermes_home:
             raise RuntimeError("memoryweb provider: initialize() requires hermes_home")
-        command = shutil.which("memoryweb")
+        command = _resolve_command()
         if not command:
             raise RuntimeError(self.unavailable_reason())
         self._command = command
