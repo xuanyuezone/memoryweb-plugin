@@ -45,6 +45,17 @@ def main() -> int:
     check("name property is 'memoryweb'", provider.name == "memoryweb")
     check("is_available (binary on PATH)", provider.is_available())
 
+    # 1b) registration-time routing (issue #3): MemoryManager builds its
+    # dispatch table from get_tool_schemas() ONCE at add_provider, before any
+    # initialize() — the provider must answer with schemas at that point.
+    from agent.memory_manager import MemoryManager
+
+    manager = MemoryManager()
+    manager.add_provider(provider)
+    routed = len(getattr(manager, "_tool_to_provider", {}) or {})
+    check("manager routing table filled at registration (pre-initialize)",
+          routed >= 15, f"{routed} tools routed")
+
     # 2) initialize through the documented kwargs
     hermes_home = os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes"))
     session_id = f"provider-probe-{int(time.time())}"
@@ -63,6 +74,10 @@ def main() -> int:
     domains = (reply.get("result") or {}).get("domains") or []
     check("handle_tool_call dispatches to the live server",
           any(str(d).startswith("demo/") for d in domains), ", ".join(map(str, domains)))
+
+    manager_reply = manager.handle_tool_call("memoryweb_domains", {"action": "list"})
+    check("manager dispatch resolves memoryweb_* tools after initialize",
+          "domains" in manager_reply, manager_reply[:70])
 
     bad = json.loads(provider.handle_tool_call("memoryweb_recall", {"id": "no-such-node"}))
     check("tool errors come back as JSON, never raise",

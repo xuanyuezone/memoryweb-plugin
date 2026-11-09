@@ -1,0 +1,810 @@
+{
+ "_frozen_from": "memoryweb v1.65.0 tools/list",
+ "tools": [
+  {
+   "name": "remember",
+   "description": "After filing, call connect for every suggested_connections entry before ending your session. Orphaned memories lose context immediately.\n\nFile one or more concepts, decisions, or findings. Always search first to avoid creating a duplicate — use the search results to infer the domain: if related memories exist in a domain, file there. Prefer existing domains over creating new ones; only propose a new domain if no related content is found anywhere. Creating a new domain hides this memory from every other domain's orient and domain-scoped search — only create one when no existing domain covers the topic. Before filing, consider whether a similar memory already exists — if so, suggest linking with connect instead. Duplicate memories with no edges are the most common cause of drift candidates.\n\nIf this memory is a decision that rests on something you checked — code you read, a doc you fetched, a log you inspected, a search result — file that evidence separately as node_kind='finding' and connect the decision to it with depends_on or caused_by. Don't let the decision's description silently absorb the evidence as prose.\n\nWhen reviewing suggested_connections, check each candidate for contradiction as well as relevance — a semantically close memory that asserts the opposite of what you just filed is a conflict candidate, not just a link opportunity. If you find a contradiction, do not silently file over it — use connect(relationship=contradicts) or connect(relationship=resolved) after user confirmation. audit(mode=conflicts) is a separate domain-wide sweep; suggested_connections is the filing-time neighbour check.\n\nSingle mode (omit items): provide label, domain, and optional fields directly. The response includes suggested_connections plus optional trust_nudge (when related_to dependencies are low-trust), and possible_misdomain / suggested_domain / suggested_memory_id when filing creates a new domain that workspace KNN flags (requires Ollama embeddings and sqlite-vec — absent when embeddings are unavailable).\n\nBatch mode (provide items array): file multiple memories in a single transaction. Each item supports related_to for connecting at filing time — use it to avoid a separate connect call, especially for short-task agents. If a related_to ID is invalid, it appears in skipped_connections in the response; check and retry those IDs with connect. Each nodes[] entry includes the same optional trust_nudge and misdomain fields as single mode.\n\nFor occurred_at in either mode: two cases — (a) In-session witnessed: you directly observed this decision or event happen during the current conversation. Set occurred_at freely using today's date. No confirmation needed. (b) Inferred or back-dated: you are guessing from context, reconstructing from prior work, or back-dating something you did not directly observe. Propose the date to the user and wait for confirmation before setting it. Never guess. Never infer it silently from context. If the user confirms without specifying a date, use today's system date. Future dates are valid for planned events and reminders.\n\nUse node_kind to classify each memory: 'decision' (default): a settled fact or choice — if it rests on checked evidence, file a separate 'finding' and connect with depends_on or caused_by. 'reference': an entity (person, system, org). 'issue': a problem or open question. 'option': a candidate answer to an issue. 'assumption': an unverified precondition. 'finding': an empirical observation. 'standing': a durable rule — appears in orient rules. 'goal': a desired future state. 'transient': short-lived state, surfaced by audit(mode=stale) after 7 days. Standing memories appear in the rules section of orient. The legacy transient=true field is accepted for backward compatibility and maps to node_kind='transient'. The legacy decision_type field name is rejected — use node_kind instead.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "description": {
+      "type": "string",
+      "description": "What this memory is about"
+     },
+     "domain": {
+      "type": "string",
+      "description": "The domain or project this belongs to (e.g. 'deep-game', 'sedex', 'general'). Required in single mode; omit when using items."
+     },
+     "items": {
+      "type": "array",
+      "description": "Batch mode: array of memory objects to file in a single transaction. Each must have label (string, required) and domain (string, required). Optional: description, why_matters, tags (space-separated keywords), occurred_at (ISO8601 — in-session: set freely; inferred/back-dated: propose+confirm, never infer silently), node_kind (string: transient|reference|issue|decision|option|assumption|finding|standing|goal — decisions resting on checked evidence need a separate finding + depends_on or caused_by link), transient (boolean, deprecated — maps to node_kind=transient), related_to (string ID, object with id+relationship, or array of either — connects at filing time; invalid IDs appear in skipped_connections). New domain: hides the memory from other domains' orient and domain-scoped search.",
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string"
+        },
+        "domain": {
+         "type": "string"
+        },
+        "description": {
+         "type": "string"
+        },
+        "why_matters": {
+         "type": "string"
+        },
+        "tags": {
+         "type": "string"
+        },
+        "occurred_at": {
+         "type": "string"
+        },
+        "node_kind": {
+         "type": "string",
+         "enum": [
+          "transient",
+          "reference",
+          "issue",
+          "decision",
+          "option",
+          "assumption",
+          "finding",
+          "standing",
+          "goal"
+         ]
+        },
+        "transient": {
+         "type": "boolean"
+        },
+        "related_to": {
+         "description": "Connect at filing time. String ID (connects_to), object {id, relationship}, or array of either. Invalid IDs appear in skipped_connections — not silently dropped."
+        }
+       },
+       "required": [
+        "label",
+        "domain"
+       ]
+      }
+     },
+     "label": {
+      "type": "string",
+      "description": "Short name for this memory (e.g. 'RST $10 boot crash'). Required in single mode; omit when using items."
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Classify this memory. 'decision' (default): a settled fact or choice — if it rests on checked evidence, file a separate 'finding' and connect with depends_on or caused_by. 'reference': an entity (person, system, org). 'issue': a problem or open question. 'option': a candidate answer to an issue. 'assumption': an unverified precondition. 'finding': an empirical observation. 'standing': a durable rule or constraint that governs other memories — appears in the rules section of orient. 'goal': a desired future state. 'transient': short-lived state — surfaced by audit(mode=stale) after 7 days.",
+      "enum": [
+       "transient",
+       "reference",
+       "issue",
+       "decision",
+       "option",
+       "assumption",
+       "finding",
+       "standing",
+       "goal"
+      ]
+     },
+     "occurred_at": {
+      "type": "string",
+      "description": "ISO8601 date or datetime. (a) In-session witnessed: you directly observed this happen in the current conversation — set freely using today's date, no confirmation needed. (b) Inferred or back-dated: you are guessing or reconstructing — propose to user and wait for confirmation. Never guess. Never infer silently. Single mode only."
+     },
+     "related_to": {
+      "type": "array",
+      "description": "Optional list of memories to auto-connect at creation time. Single mode only. Each item is either a plain memory ID string (creates a connects_to connection) or an object with id and relationship fields. Invalid or unknown IDs are silently skipped.",
+      "items": {
+       "oneOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "string"
+          },
+          "relationship": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "id"
+         ],
+         "additionalProperties": false
+        }
+       ]
+      }
+     },
+     "tags": {
+      "type": "string",
+      "description": "Space-separated synonyms and keywords that improve search recall. Examples: 'testing gradle kotlin approval'. These are searched alongside label, description, and why_matters. Populate this with alternative terms an agent might use to find this memory later."
+     },
+     "transient": {
+      "type": "boolean",
+      "description": "Deprecated — use node_kind='transient' instead. Accepted for backward compatibility: if true and node_kind is not set, maps to node_kind='transient'."
+     },
+     "why_matters": {
+      "type": "string",
+      "description": "Why this is significant - the 'so what'"
+     }
+    }
+   }
+  },
+  {
+   "name": "connect",
+   "description": "Connect memories with typed, narrative relationships. Valid relationship types are: caused_by, led_to, blocked_by, unblocks, connects_to, contradicts, depends_on, is_example_of, governed_by, resolved, resolved_by, supersedes — and all memory IDs must already exist before calling this.\n\nSingle mode (omit items): provide from_memory, to_memory, relationship directly.\n\nBatch mode (provide items array): create multiple connections in a single transaction.\n\nRelationship guidance: caused_by / led_to describe the same link from opposite ends (A caused_by B ≡ B led_to A). blocked_by / unblocks describe dependency on resolving an external issue. depends_on is a hard technical or logical prerequisite. contradicts marks a direct conflict. is_example_of marks an illustration. governed_by links a memory to a standing rule or constraint that it must satisfy. connects_to is the general fallback — use it only when no typed relationship fits.\n\nResolving a contradiction: after adjudicating a contradicts pair, connect the two memories directly with resolved (or resolved_by / supersedes) — never disconnect the contradicts edge. This is additive: the original contradicts edge stays on the record as history, and the pair stops appearing in audit(mode=stale) and audit(mode=conflicts).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "from_memory": {
+      "type": "string",
+      "description": "ID of the source memory. Required in single mode; omit when using items."
+     },
+     "items": {
+      "type": "array",
+      "description": "Batch mode: array of edge objects. Each must have from_memory, to_memory, relationship (string). Optional: narrative (string), verdict (string, resolved only).",
+      "items": {
+       "type": "object",
+       "properties": {
+        "from_memory": {
+         "type": "string"
+        },
+        "to_memory": {
+         "type": "string"
+        },
+        "relationship": {
+         "type": "string"
+        },
+        "narrative": {
+         "type": "string"
+        },
+        "verdict": {
+         "type": "string",
+         "enum": [
+          "false_positive",
+          "reconciled",
+          "superseded"
+         ]
+        }
+       },
+       "required": [
+        "from_memory",
+        "to_memory",
+        "relationship"
+       ]
+      }
+     },
+     "narrative": {
+      "type": "string",
+      "description": "The story of this connection - why these two things are linked"
+     },
+     "relationship": {
+      "type": "string",
+      "description": "Type of relationship. Required in single mode. Use resolved (or resolved_by / supersedes) to adjudicate a contradicts pair — additive, does not remove the contradicts edge.",
+      "enum": [
+       "caused_by",
+       "led_to",
+       "blocked_by",
+       "unblocks",
+       "connects_to",
+       "contradicts",
+       "depends_on",
+       "is_example_of",
+       "governed_by",
+       "resolved",
+       "resolved_by",
+       "supersedes"
+      ]
+     },
+     "to_memory": {
+      "type": "string",
+      "description": "ID of the target memory. Required in single mode; omit when using items."
+     },
+     "verdict": {
+      "type": "string",
+      "description": "Optional outcome classification when relationship=resolved. Ignored (not stored) for other relationship types, but invalid enum values are still rejected. Values: false_positive, reconciled, superseded.",
+      "enum": [
+       "false_positive",
+       "reconciled",
+       "superseded"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "recall",
+   "description": "Retrieve a memory and all its connections by ID. Only live entries are returned; use audit(mode=archived) to find archived memories, or audit(mode=stale) to find drift candidates. Never acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "Memory ID"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  },
+  {
+   "name": "search",
+   "description": "Search memories by text across label, description, why_matters, and tags. Omitting `domain` searches the entire workspace across all domains. Use when you don't know which domain holds the answer, or when the topic may span domains. Scope to a single domain when you know it — results are cleaner and faster. Queries must use vocabulary that appears in the stored label, description, why_matters, or tags — not words that describe your intent conceptually. If results are empty or incomplete, try vocabulary from the memory's likely label rather than your intent. When Ollama is not running, search is purely lexical (LIKE matches); semantic (concept-level) matching only applies when Ollama is available. Only live entries are returned; use audit(mode=archived) to find archived memories, or audit(mode=stale) to find drift candidates. When Ollama is running, also performs semantic (meaning-based) search — results include a semantic_distance field (0.0–1.0, lower = closer match). Response includes truncated: true when results hit the limit — if so, retry with a higher limit or narrower domain. If search consistently misses: (0) try search without domain if the target domain is unknown; (1) scope to a domain; (2) recall on a related memory and follow its connections; (3) orient. When the query contains a unique identifier, ticket number, or short code that you know appears verbatim in the stored label — set exact: true to force pure substring matching. Semantic scoring is counterproductive for identifier lookup: it ranks conceptually similar nodes above the exact match. Never acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble. Returns lean node data only — id, label, and a short excerpt. If you need full node content, call recall(id). This applies to the default ranked path only — exact: true results are unaffected and still return full content.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "digest": {
+      "type": "boolean",
+      "description": "When true, collapse each result memory to a single compact text line in a lines array instead of JSON objects — saves tokens on multi-result calls. Default false. Does not apply when exact: true (full content path). Each line has the form: [id] label — excerpt (domain, node_kind). When semantic search is active, a distance score (0.00–1.00) is appended after two spaces — lower is closer. Each line includes id for recall(id) follow-up."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Optional domain to scope search. Omit to search the entire workspace across all domains. Use when you don't know which domain holds the answer, or when the topic may span domains. Scope to a single domain when you know it — results are cleaner and faster."
+     },
+     "exact": {
+      "type": "boolean",
+      "description": "When true, bypass semantic ranking and use pure substring (LIKE) matching only. Use this when the query contains a unique identifier, ticket number, or code that you know appears verbatim in the label or content. Results will not include a semantic_distance field."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max results (default 10). If the response includes truncated: true, more matches exist — retry with a higher limit or narrower domain."
+     },
+     "memory_id": {
+      "type": "string",
+      "description": "Anchor memory ID. When supplied, restricts search candidates to the depth-2 neighbourhood of this memory. Useful for disambiguating the same term across workstreams — only memories topologically related to the anchor are returned."
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Optional filter by node_kind. Space-separated for OR match (e.g. 'decision standing'). When set without query, lists matching memories ordered by updated_at DESC."
+     },
+     "query": {
+      "type": "string",
+      "description": "Terms to search for. Must use vocabulary that appears in the stored label, description, why_matters, or tags. Required unless node_kind is set alone (lists by kind). For unique identifiers known to appear verbatim, also set exact: true."
+     }
+    }
+   }
+  },
+  {
+   "name": "history",
+   "description": "Returns memories in chronological order. Two order modes:\n\norder=effective (default): sort by effective date COALESCE(occurred_at, created_at). Set important_only=true for the narrative spine (occurred_at set only). Use from/to to filter by effective date.\n\norder=modified: sort by last updated (updated_at DESC). Set group_by_domain=true (with no domain) for {groups, results_truncated}. group_by_domain requires order=modified.\n\nBoth modes return {nodes, results_truncated} (or {lines, results_truncated} when digest=true). When results_truncated is true, raise limit to retrieve more.\n\nPass memory_id to scope to a neighbourhood (depth 2 default, domain-clipped). memory_id takes precedence over domain if both are supplied.\n\nUse tags to filter (comma-separated). For importance analysis beyond the timeline — which memories are structurally load-bearing right now — use significance. Never acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble. Returns lean node data only — id, label, and a short excerpt. If you need full node content, call recall(id).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "depth": {
+      "type": "integer",
+      "description": "Neighbourhood depth when using memory_id (default 2)."
+     },
+     "digest": {
+      "type": "boolean",
+      "description": "When true, collapse each result to a single compact text line in a lines array. Default false."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Optional domain to scope. Not required when memory_id is supplied."
+     },
+     "from": {
+      "type": "string",
+      "description": "effective order only. ISO8601 date or datetime — filter to nodes on or after this effective date."
+     },
+     "group_by_domain": {
+      "type": "boolean",
+      "description": "When true and order=modified with no domain, group results by domain (up to limit entries per domain). Ignored when memory_id is set. Cannot be combined with node_kind — returns an error if both are set."
+     },
+     "important_only": {
+      "type": "boolean",
+      "description": "effective order only. When true, return only memories with occurred_at explicitly set."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max results (default 20 for effective, 10 for modified)"
+     },
+     "memory_id": {
+      "type": "string",
+      "description": "Optional — scope to the neighbourhood of this memory (depth 2 by default, domain-clipped). Takes precedence over domain if both are supplied."
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Optional filter by node_kind. Space-separated for OR match."
+     },
+     "order": {
+      "type": "string",
+      "description": "Sort order. effective (default): by COALESCE(occurred_at, created_at). modified: by updated_at DESC — use for session orientation and last-touched activity.",
+      "enum": [
+       "effective",
+       "modified"
+      ]
+     },
+     "tags": {
+      "type": "string",
+      "description": "Optional comma-separated list of tags to filter by. Only memories matching at least one tag are returned."
+     },
+     "to": {
+      "type": "string",
+      "description": "effective order only. ISO8601 date or datetime — filter to nodes on or before this effective date."
+     }
+    }
+   }
+  },
+  {
+   "name": "why_connected",
+   "description": "Find direct connections between two memories. Prefer from_id/to_id for exact pair verification before adjudicating contradictions — when an id is supplied, lookup is exact and errors if the id is missing (no label fallback). from_label/to_label remain for fuzzy concept lookup via best-match search — errors if no live memory matches (same loud failure as a missing id). Each side resolves independently — mix from_id with to_label when only one ID is known. Cannot supply both from_id and from_label (same for to_*). Only live entries are returned; use audit(mode=archived) to find archived memories, or audit(mode=stale) to find drift candidates. Never acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "domain": {
+      "type": "string",
+      "description": "Optional domain to scope label search (ignored for id lookup)"
+     },
+     "from_id": {
+      "type": "string",
+      "description": "Exact ID of the first memory — preferred for pair verification"
+     },
+     "from_label": {
+      "type": "string",
+      "description": "Label or description of the first concept (fuzzy best-match when from_id omitted)"
+     },
+     "to_id": {
+      "type": "string",
+      "description": "Exact ID of the second memory — preferred for pair verification"
+     },
+     "to_label": {
+      "type": "string",
+      "description": "Label or description of the second concept (fuzzy best-match when to_id omitted)"
+     }
+    }
+   }
+  },
+  {
+   "name": "significance",
+   "description": "Dual-signal importance analysis by default (mode=significance). Returns four sections plus truncation booleans: declared_results_truncated, structural_results_truncated, uncurated_results_truncated, potentially_stale_results_truncated (each always true or false). When any is true, raise declared_limit or limit to retrieve more.\n\n- declared: memories with occurred_at set, chronological.\n- structural: ranked by recency-weighted inbound degree.\n- uncurated: structural top-N without occurred_at — curation candidates.\n- potentially_stale: declared but not in structural top-N.\n\ncall_id is an opaque server-side correlation id for analytics — agents can ignore it.\n\nSet mode=trust for epistemic trust ranking — each entry includes trust_score and trust_basis derived from node_kind and connected relationship types.\n\nPass memory_id to scope to a neighbourhood (depth 2 default). Pass domain for full domain scan.\n\nDo not use this for chronological listing — use history. For age-based staleness or orphans, use audit.\n\nNever acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble. Returns lean node data only. If you need full content, call recall(id).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "declared_limit": {
+      "type": "integer",
+      "description": "Max declared and potentially_stale entries (default 100, max 500). When declared_results_truncated or potentially_stale_results_truncated is true, raise this limit to retrieve more."
+     },
+     "depth": {
+      "type": "integer",
+      "description": "Neighbourhood depth when using memory_id (default 2). Depth 1 produces near-uniform low scores and must not be used as default."
+     },
+     "digest": {
+      "type": "boolean",
+      "description": "When true, collapse each section's memories to compact text lines instead of JSON objects. Default false."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Domain to analyse. Required unless memory_id is supplied."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Top-N for structural ranking in domain mode (default 10). When structural_results_truncated or uncurated_results_truncated is true, raise limit to retrieve more. Ignored in memory_id mode — the neighbourhood is naturally bounded."
+     },
+     "memory_id": {
+      "type": "string",
+      "description": "Optional — scope significance to a memory's neighbourhood (depth 2 by default, domain-clipped). Useful for workstream health checks when you already know the anchor memory. Takes precedence over domain if both are supplied."
+     },
+     "mode": {
+      "type": "string",
+      "description": "Default 'significance' returns the existing four-section dual-signal analysis. 'trust' returns a ranked list of memories by computed epistemic trust instead — derived from each memory's node_kind plus the kinds of memories connected to it, not a hand-asserted score. A contradicts edge lowers trust; other relationships raise it.",
+      "enum": [
+       "significance",
+       "trust"
+      ]
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Optional filter by node_kind. Space-separated for OR match. Applies to significance and trust modes in domain scope."
+     },
+     "recency_window": {
+      "type": "integer",
+      "description": "Days. Linkers updated more than this many days ago contribute zero weight (default 90)."
+     },
+     "tags": {
+      "type": "string",
+      "description": "Optional comma-separated list of tags to filter by. Only memories matching at least one tag are included in the analysis. Applies in domain mode. Examples: 'architecture,security' or 'release'."
+     }
+    }
+   }
+  },
+  {
+   "name": "forget",
+   "description": "Archive or un-archive a memory. Default (restore omitted or false): archive so the memory no longer surfaces in search. Set restore=true to un-archive — obtain the ID from audit(mode=archived). When archiving, always provide a reason — recorded in the audit log. Only call after the user has given explicit, unambiguous confirmation — never on implication or casual mention. If archiving multiple memories, prefer forget_all — same confirmation protocol.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "ID of the memory to archive or un-archive"
+     },
+     "reason": {
+      "type": "string",
+      "description": "Required when archiving (when the unarchive flag is false). Why this memory is being archived"
+     },
+     "restore": {
+      "type": "boolean",
+      "description": "When true, un-archive the memory so it surfaces in search again. When false or omitted, archive the memory."
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  },
+  {
+   "name": "audit",
+   "description": "Inspect the health of knowledge in a domain across five modes. Omitting `domain` scans the entire workspace.\n\nAll multi-result modes return a wrapped object with results_truncated — never a bare array. When results_truncated is true, raise limit to retrieve more.\n\nmode=stale: Returns {candidates, results_truncated, placeholders, placeholders_truncated}. Drift candidates — stale, contradicted, or duplicated memories — plus a separate placeholders section: connected live memories whose label or node_kind signals an unresolved placeholder (TBD, TODO, open question, stale goal/issue). Empty result is {candidates: [], results_truncated: false, placeholders: [], placeholders_truncated: false}. Present each to the user; never archive autonomously. Check placeholders_truncated and raise limit when true. Default limit 10 (max 500).\n\nmode=orphans: Returns {nodes, results_truncated} — live, non-transient memories with zero connections. Empty result is {nodes: [], results_truncated: false}. Default limit 50 (max 500).\n\nmode=archived: Returns {nodes, results_truncated}. Empty result is {nodes: [], results_truncated: false}. **Capped at 25 by default** — this is not a complete archive listing. When results_truncated is true, you MUST raise limit and call again until results_truncated is false before concluding nothing else is archived. Use when search returns nothing but you expect content to exist.\n\nmode=conflicts: Returns {candidates, results_truncated}. Empty result is {candidates: [], results_truncated: false}. Semantically adjacent pairs that may warrant contradiction review — candidates only, not confirmed conflicts. Default limit 10 (max 100). Pairs already linked by contradicts, resolved, resolved_by, or supersedes are excluded; other edge types do not suppress. After resolving, connect with relationship=resolved (or resolved_by / supersedes) — additive; do not disconnect the contradicts edge.\n\nmode=kind_coverage: Returns {total_nodes, by_kind, legacy_dominant_pct, migration_candidates, results_truncated}. Taxonomy health signal — per-kind counts, legacy decision/standing dominance percentage, and lean migration_candidates (id, label, truncated why_matters only). Candidate-surfacing only; never auto-revise; use recall(id) for full content. Default limit 50 (max 500) on migration_candidates.\n\ndigest=true collapses to {lines, results_truncated, placeholder_lines, placeholders_truncated} for stale; {lines, results_truncated} for orphans.\n\nSupply tags to scope to a workstream. Supply memory_id (mode=stale only) to scope to a memory's neighbourhood.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "digest": {
+      "type": "boolean",
+      "description": "When true, stale and orphans return {lines, results_truncated} instead of full objects. Default false."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Optional domain to scope the audit. Omit to scan the entire workspace. Use for cross-domain drift review; scope to a domain for focused maintenance passes."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max results. Defaults: stale=10, orphans=50, archived=25, conflicts=10. When results_truncated is true, raise limit to retrieve more. archived max 500; stale/orphans max 500; conflicts max 100."
+     },
+     "memory_id": {
+      "type": "string",
+      "description": "Anchor memory ID. Scopes stale candidates to the depth-2 BFS neighbourhood of this memory. Applies to mode=stale only; ignored for orphans, archived, and conflicts."
+     },
+     "mode": {
+      "type": "string",
+      "description": "Required: stale (drift candidates), orphans (isolated memories), archived (list archived memories), conflicts (semantic contradiction candidates), or kind_coverage (taxonomy health / migration readiness)",
+      "enum": [
+       "stale",
+       "orphans",
+       "archived",
+       "conflicts",
+       "kind_coverage"
+      ]
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Optional filter by node_kind. Space-separated for OR match. Applies to all four modes."
+     },
+     "tags": {
+      "type": "string",
+      "description": "Comma-separated tags. Only surfaces candidates carrying at least one of the supplied tags. OR semantics. Applies to all four modes."
+     }
+    },
+    "required": [
+     "mode"
+    ]
+   }
+  },
+  {
+   "name": "forget_all",
+   "description": "Batch archive — use this when you have 2 or more confirmed memories to archive at once. More efficient than multiple forget calls. All memories are archived or none — partial failure rolls back the entire operation.\n\nOnly call this tool after explicit, unambiguous user confirmation for every item in the list — never on implication or casual mention. 'That looks stale' or 'probably outdated' is not confirmation. Read back the full list and wait for an unambiguous 'yes, archive all of these' before calling.\n\nAfter archiving, report each archived ID and note that memories can be un-archived at any time with forget(restore=true).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "items": {
+      "type": "array",
+      "description": "Array of memories to archive. Each must have id (string, required) and reason (string, required).",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string"
+        },
+        "reason": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "id",
+        "reason"
+       ]
+      }
+     }
+    },
+    "required": [
+     "items"
+    ]
+   }
+  },
+  {
+   "name": "restore_all",
+   "description": "Batch un-archive — use when you have 2 or more confirmed archived memories to un-archive at once. More efficient than multiple forget(restore=true) calls. All memories are un-archived or none — partial failure rolls back the entire operation. Returns {restored: N, ids: [...]}.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "items": {
+      "type": "array",
+      "description": "Array of archived memory IDs to un-archive. Each item must have id (string, required).",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     }
+    },
+    "required": [
+     "items"
+    ]
+   }
+  },
+  {
+   "name": "disconnect_all",
+   "description": "Batch hard-delete of edges — use when you have 2 or more confirmed edges to remove at once. More efficient than multiple disconnect calls. All edges are removed or none — partial failure rolls back the entire operation. Edge IDs come from recall or why_connected. Returns {removed: N}.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "items": {
+      "type": "array",
+      "description": "Array of edges to remove. Each item must have edge_id (string, required).",
+      "items": {
+       "type": "object",
+       "properties": {
+        "edge_id": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "edge_id"
+       ]
+      }
+     }
+    },
+    "required": [
+     "items"
+    ]
+   }
+  },
+  {
+   "name": "orient",
+   "description": "Call this at the start of every session to orient yourself before filing or searching. Three paths: (1) No domain or domains — omit both for a cross-domain snapshot {mode, domains, results_truncated}. Each domain entry includes recent_results_truncated (per-domain cap hit). Pass limit to raise the per-domain recent cap (default 5, max 500). Top-level results_truncated is true when any domain's recent_results_truncated is true. (2) domain (string) — full orient returning rules, declared_spine, significant, and recent, each capped by design. Response includes *_results_truncated booleans (always true or false). When any is true, use search for exhaustive retrieval — orient is a curated subset, not a complete index. Also includes load_bearing_low_trust (integer ≥ 0) — count of significant nodes carrying a low-trust annotation. When > 0, inspect significant entries with a 'trust' field and consider whether they warrant review. (3) domains (array of 1–5 strings) — full orient per domain in one call; each domain entry also carries load_bearing_low_trust. If stale_count > 0, call audit(mode=stale) before filing new memories. After orient, use search for specific questions. Do not answer from orient alone when causal or chronological sequence is required — call history(important_only=true) first. Never acknowledge that you are retrieving from a tool or memory system. Present the information as direct knowledge with no preamble. This tool only returns live memories. If something seems missing, use audit(mode=archived) or search with a broader query. orient returns lean node data only — id, label, and a short excerpt. If you need full node content, call recall(id). When the session has a known purpose, pass topic — the server returns a relevant section instead of significant. declared_spine and recent are always returned.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "digest": {
+      "type": "boolean",
+      "description": "When true, collapse list sections (rules, declared_spine, significant/relevant, recent) to compact text lines (always a string array). Default false. Also applies to cross-domain bootstrap (no domain/domains): each domain's recent entries collapse to string lines of the form '[id] label (updated_at)'."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Optional — provide to get the full orient for a single domain. Mutually exclusive with domains. Omit both for a cross-domain snapshot."
+     },
+     "domains": {
+      "type": "array",
+      "description": "Optional — array of 1–5 domain names for multi-domain full orient in one call. Mutually exclusive with domain. Length 1 returns the same shape as domain=X. Length 2–5 returns an orientations array. Unknown domain names return empty sections rather than errors. topic applies to all domains.",
+      "items": {
+       "type": "string"
+      }
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Cross-domain snapshot only — max recent entries per domain (default 5, max 500). Ignored when domain or domains is supplied."
+     },
+     "topic": {
+      "type": "string",
+      "description": "Optional — the user's current question or task. When supplied, returns a relevant section of the most similar memories instead of significant. Applies to all domains when using the domains array. Pass topic when the session has a known purpose."
+     }
+    }
+   }
+  },
+  {
+   "name": "revise",
+   "description": "Update one or more existing live memories. Only the fields you provide are changed — omitted fields keep their current values. Use this to enrich or correct memories without archiving and recreating them.\n\nWhen updating a decision's description, do not paste new source material (code, logs, docs, search results) into the description — file a node_kind='finding' for the evidence and connect with depends_on or caused_by.\n\nSingle mode (omit items): provide id and any fields to update. Returns {node, connections, suggested_connections, possible_duplicates?, trust_nudge?}. Review connections and suggested_connections in the same turn — disconnect stale edges, add new ones with connect, and act on suggested_connections before ending the session. Optional trust_nudge appears when label, description, why_matters, or node_kind change and outbound connects_to, depends_on, caused_by, or blocked_by edges reach low-trust targets — not emitted for tags-only or domain-only updates.\n\nBatch mode (provide items array): update multiple memories in a single transaction. All updates succeed or all are rolled back. Returns {updated: [{node, connections, suggested_connections, trust_nudge?}]}; each entry carries the same review imperative as single mode.\n\nFor occurred_at in either mode: two cases — (a) In-session witnessed: you directly observed this decision or event happen during the current conversation. Set occurred_at freely using today's date. No confirmation needed. (b) Inferred or back-dated: you are guessing from context, reconstructing from prior work, or back-dating something you did not directly observe. Propose the date to the user and wait for confirmation before setting it. Never guess. Never infer it silently from context. If the user confirms without specifying a date, use today's system date.\n\nDomain move protocol: only set domain when the user explicitly names the target domain. Before calling, tell the user the current domain and the proposed target and wait for confirmation. 'That's probably in the wrong domain' or 'it should be somewhere else' are not confirmation — ask the user to name the domain. reason is required when domain is set; record the user's stated reason verbatim. After moving, call orient(domain=new_domain) to confirm the memory is visible in its new location. Never acknowledge that you are retrieving from a tool or memory system.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "description": {
+      "type": "string",
+      "description": "New description (optional)"
+     },
+     "domain": {
+      "type": "string",
+      "description": "Move this memory to a different domain. Requires reason. Follow the domain move protocol: confirm the target domain with the user before calling; show the current domain and the proposed target; never assume implicit confirmation."
+     },
+     "id": {
+      "type": "string",
+      "description": "ID of the memory to update. Required in single mode; omit when using items."
+     },
+     "items": {
+      "type": "array",
+      "description": "Batch mode: array of update objects. Each must have id (string, required). Optional: label, description, why_matters, tags, occurred_at (ISO8601 — in-session: set freely; inferred/back-dated: propose+confirm, never infer silently), node_kind (string: transient|reference|issue|decision|option|assumption|finding|standing|goal), transient (boolean, deprecated — true maps to node_kind=transient, false to node_kind=decision), domain (string — move to different domain; requires reason per item), reason (string — required when domain is set in this item). Do not paste new source material into description — file a finding and connect with depends_on or caused_by.",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string"
+        },
+        "label": {
+         "type": "string"
+        },
+        "description": {
+         "type": "string"
+        },
+        "why_matters": {
+         "type": "string"
+        },
+        "tags": {
+         "type": "string"
+        },
+        "occurred_at": {
+         "type": "string"
+        },
+        "node_kind": {
+         "type": "string",
+         "enum": [
+          "transient",
+          "reference",
+          "issue",
+          "decision",
+          "option",
+          "assumption",
+          "finding",
+          "standing",
+          "goal"
+         ]
+        },
+        "transient": {
+         "type": "boolean"
+        },
+        "domain": {
+         "type": "string"
+        },
+        "reason": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "label": {
+      "type": "string",
+      "description": "New label (optional)"
+     },
+     "node_kind": {
+      "type": "string",
+      "description": "Classify this memory. 'decision' (default): a settled fact or choice. 'reference': an entity (person, system, org). 'issue': a problem or open question. 'option': a candidate answer to an issue. 'assumption': an unverified precondition. 'finding': an empirical observation. 'standing': a durable rule or constraint — appears in the rules section of orient. 'goal': a desired future state. 'transient': short-lived state, surfaced by audit(mode=stale) after 7 days. Omit to leave unchanged.",
+      "enum": [
+       "transient",
+       "reference",
+       "issue",
+       "decision",
+       "option",
+       "assumption",
+       "finding",
+       "standing",
+       "goal"
+      ]
+     },
+     "occurred_at": {
+      "type": "string",
+      "description": "ISO8601 date or datetime. (a) In-session witnessed: you directly observed this happen in the current conversation — set freely using today's date, no confirmation needed. (b) Inferred or back-dated: you are guessing or reconstructing — propose to user and wait for confirmation. Never guess. Never infer silently. Single mode only."
+     },
+     "reason": {
+      "type": "string",
+      "description": "Required when domain is set. Explain why the domain change is needed. Recorded in the audit log as 'domain (was OLD → NEW): reason'. Record the user's stated reason verbatim."
+     },
+     "tags": {
+      "type": "string",
+      "description": "New space-separated search tags (optional); replaces any existing tags"
+     },
+     "transient": {
+      "type": "boolean",
+      "description": "Deprecated — use node_kind instead. Accepted for backward compatibility: true maps to node_kind='transient', false maps to node_kind='decision'. Omit to leave unchanged."
+     },
+     "why_matters": {
+      "type": "string",
+      "description": "New why_matters text (optional)"
+     }
+    }
+   }
+  },
+  {
+   "name": "suggest_connections",
+   "description": "Given a memory ID, return up to 5 candidate connections from the same domain whose labels, descriptions, or tags overlap with the source memory. Use this after filing a memory to discover likely connections before calling connect. This tool is read-only — it never creates connections.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "ID of the memory to find connection candidates for"
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max candidates to return (default 5)"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  },
+  {
+   "name": "domains",
+   "description": "Domain administration and discovery. Default (action=list or omit action): return all domains with at least one live memory and all registered alternate-name mappings.\n\naction=add_alias: register alternate name → canonical domain. Requires alias and domain.\naction=remove_alias: remove a registered alternate name. Requires alias.\naction=resolve: return the canonical domain for a name. Requires name.\naction=rename: rename an entire domain in place — all memories move, and an alternate name from the old domain is registered automatically. Requires old_domain and new_domain. Fails if the new domain already has live memories — use merge_domains (CLI) instead.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "description": "list (default), add_alias, remove_alias, resolve, or rename",
+      "enum": [
+       "list",
+       "add_alias",
+       "remove_alias",
+       "resolve",
+       "rename"
+      ]
+     },
+     "alias": {
+      "type": "string",
+      "description": "Alias name. Required for add_alias and remove_alias."
+     },
+     "domain": {
+      "type": "string",
+      "description": "Canonical domain name. Required for add_alias."
+     },
+     "name": {
+      "type": "string",
+      "description": "Name to resolve. Required for action=resolve."
+     },
+     "new_domain": {
+      "type": "string",
+      "description": "New domain name. Required for action=rename."
+     },
+     "old_domain": {
+      "type": "string",
+      "description": "Current domain name. Required for action=rename."
+     }
+    }
+   }
+  },
+  {
+   "name": "disconnect",
+   "description": "Remove a connection between two memories by edge ID. Obtain the edge ID from recall. This is a hard delete — the connection cannot be restored.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "ID of the edge to remove"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  },
+  {
+   "name": "visualise",
+   "description": "Generate a Mermaid.js flowchart. Pass `memory_id` to see a single memory and all its direct connections. Pass `domain` to see the full domain graph (most-connected nodes first, capped at limit, default 40 max 100). Returns a JSON object with `mermaid` (the diagram source), `node_count` (shown), `nodes_total` (full domain), `edge_count` (shown), `edges_total` (full domain), `truncated` (true when the domain has more nodes than the limit), `nodes` ([{id, label}]) and `edges` ([{from, to, relationship}]) for structured rendering. Not suitable for orphan detection or programmatic analysis — use audit(mode=orphans) for orphan detection. Output may be truncated for large domains. Use for human visual inspection only. Output the `mermaid` string inside a ```mermaid code block. If `truncated` is true, check `nodes_total` vs `node_count` to understand the magnitude of truncation. Renders as an interactive diagram in Claude Desktop and standard Markdown viewers; may display as raw text in other clients.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "domain": {
+      "type": "string",
+      "description": "A domain name (e.g. 'memoryweb-meta'). To visualise a single memory by ID, use the memory_id parameter instead."
+     },
+     "limit": {
+      "type": "integer",
+      "description": "Max nodes to include in domain mode (default 40, max 100). Most-connected nodes are prioritised when truncating."
+     },
+     "memory_id": {
+      "type": "string",
+      "description": "A memory ID. Returns the neighbourhood: the memory plus all directly connected memories and connections. Takes precedence over domain if both are supplied."
+     }
+    }
+   }
+  }
+ ]
+}

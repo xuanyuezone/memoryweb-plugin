@@ -47,6 +47,25 @@ PROTOCOL_VERSION = "2025-06-18"
 TRACE_DOMAIN = "hermes/sessions"
 _CHECKPOINT_DIRNAME = "memoryweb-checkpoints"
 
+# Frozen tool table (name/description/inputSchema from memoryweb v1.65.0's
+# tools/list, see static_tools.json). MemoryManager builds its dispatch routing
+# from get_tool_schemas() ONCE, at provider registration — which happens before
+# any session initialize() could start the stdio server. Returning this table
+# until the live tool list arrives keeps registration-time routing complete
+# ("registered (0 tools)" + later "Unknown tool" otherwise, #3). Live schemas
+# replace it after initialize; a server tool absent here cannot be routed until
+# the provider is re-registered — regenerate the table when bumping the pinned
+# memoryweb version.
+_STATIC_TOOLS_PATH = Path(__file__).resolve().parent / "static_tools.json"
+
+
+def _load_static_tools() -> list[dict[str, Any]]:
+    try:
+        data = json.loads(_STATIC_TOOLS_PATH.read_text(encoding="utf-8"))
+        return [t for t in data.get("tools", []) if isinstance(t, dict) and t.get("name")]
+    except (OSError, ValueError):
+        return []
+
 # Environment variables forwarded to the server process when set in the
 # provider's own environment (never required; the server has its own defaults).
 _PASSTHROUGH_ENV = ("OLLAMA_HOST", "MEMORYWEB_EMBED_MODEL")
@@ -371,8 +390,9 @@ class MemorywebMemoryProvider(MemoryProvider):
     # -- tools -----------------------------------------------------------------
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
+        source = self._tools if self._tools else _load_static_tools()
         schemas = []
-        for tool in self._tools:
+        for tool in source:
             name = str(tool.get("name") or "").strip()
             if not name:
                 continue
