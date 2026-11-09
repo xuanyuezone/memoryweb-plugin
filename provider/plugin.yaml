@@ -1,3 +1,0 @@
-name: memoryweb
-version: 0.1.0
-description: "memoryweb memory-graph provider — local SQLite graph with semantic recall, session traces and pre-compress checkpoints, bridged over the memoryweb stdio MCP server. Tools, prompt block and lifecycle all come from the running server; environment is the same MEMORYWEB_DB / OLLAMA_HOST / MEMORYWEB_EMBED_MODEL set the portable package uses."

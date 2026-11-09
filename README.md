@@ -78,16 +78,29 @@ ollama create bge-m3-8k -f Modelfile
 Any other Ollama embedding model works too — point `MEMORYWEB_EMBED_MODEL` at it; a
 database must keep using the model it was built with (dimensions must match).
 
-## Memory provider module (optional)
+## Memory provider module (bundled in the same install)
 
-Besides the portable MCP package, this repository ships a native
-**MemoryProvider** implementation in [`provider/`](provider/README.md): activate
-it with `memory.provider: memoryweb` to make the graph the agent's memory
-backend — live `memoryweb_*` tools through the provider tool surface, a domain
-snapshot in the system prompt, background semantic recall between turns,
-transient session traces via `sync_turn`, and fail-closed pre-compression
-checkpoints (`compression.checkpoint_required: true` supported). The two modules
-are independent; either or both can be installed.
+The same install ships a native **MemoryProvider** implementation (the root
+`__init__.py`, loaded from the installed plugin directory): activate it with
+`memory.provider: memoryweb` to make the graph the agent's memory backend —
+live `memoryweb_*` tools through the provider tool surface, a domain snapshot
+in the system prompt, background semantic recall between turns, built-in
+memory-tool writes mirrored into the graph via `on_memory_write`, transient
+session traces via `sync_turn`, and fail-closed pre-compression checkpoints
+(`compression.checkpoint_required: true` supported). Both modules install and
+update together — `hermes plugins update memoryweb` refreshes the provider
+code in place, because it lives at the repository root next to the portable
+manifest.
+
+`memory.provider: memoryweb` is set independently of the portable package's
+enable state (a memory provider activates through `memory.provider` alone).
+
+> **Migrating a hand-copied provider** (layouts before the root merge kept the
+> provider in `provider/`): remove the manually flattened files first —
+> `rm ~/.hermes/plugins/memoryweb/{__init__.py,plugin.yaml,static_tools.json}`
+> and clear `__pycache__` — then `hermes plugins update memoryweb` (or remove
+> and reinstall). An untracked hand-copied `__init__.py` blocks the update and
+> keeps the old code running.
 
 ## Takeover mode (graph as the only memory backend)
 
