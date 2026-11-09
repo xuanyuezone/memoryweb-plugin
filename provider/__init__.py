@@ -416,6 +416,72 @@ class MemorywebMemoryProvider(MemoryProvider):
             f"{destination.name}. Graph memory is unaffected by the rewrite."
         )
 
+    # -- built-in write mirroring (on_memory_write) ----------------------------
+
+    _MIRROR_DOMAINS = {"memory": "hermes/memory", "user": "user-profile"}
+
+    @staticmethod
+    def _mirror_label(target: str, content: str) -> str:
+        first_line = next((ln.strip() for ln in (content or "").splitlines() if ln.strip()), "")
+        return f"hermes-{target}: {first_line[:60] or '(empty)'}"
+
+    def _find_mirror(self, label: str) -> Optional[dict[str, Any]]:
+        found = json.loads(_StdioServer.result_text(
+            self._call("search", {"query": label, "exact": True, "limit": 1})))
+        nodes = found.get("nodes") if isinstance(found, dict) else None
+        return nodes[0] if nodes else None
+
+    def on_memory_write(
+        self, action: str, target: str, content: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Mirror a built-in memory-tool write into the graph (best-effort).
+
+        The built-in file store stays the source of truth (the ABC defines this
+        hook as a mirror notification, fired after the file write succeeded);
+        this keeps the graph in step so graph-side search/recall see curated
+        facts too. remove resolves the prior entry via
+        ``metadata["previous_content"]``.
+        """
+        if self._agent_context != "primary":
+            return
+        meta = dict(metadata or {})
+        act, tgt, body = action, target, content or ""
+        spawn_context_thread(
+            lambda: self._mirror_write(act, tgt, body, meta),
+            name="memoryweb-mirror-write").start()
+
+    def _mirror_write(self, action: str, target: str, content: str, metadata: dict[str, Any]) -> None:
+        domain = self._MIRROR_DOMAINS.get(target, "hermes/memory")
+        try:
+            if action == "remove":
+                previous = metadata.get("previous_content") or ""
+                node = self._find_mirror(self._mirror_label(target, previous or content))
+                if node:
+                    self._call("forget", {
+                        "id": node["id"],
+                        "reason": f"mirrored built-in '{target}' entry removed via on_memory_write",
+                    })
+                return
+            label = self._mirror_label(target, content)
+            previous = metadata.get("previous_content") or ""
+            prior = (self._find_mirror(self._mirror_label(target, previous))
+                     if previous else None) or self._find_mirror(label)
+            if prior:
+                # same curated fact, new wording: revise in place, label included,
+                # so a replace never orphans the earlier mirror
+                self._call("revise", {"id": prior["id"], "label": label,
+                                      "description": content})
+            else:
+                self._call("remember", {
+                    "domain": domain, "label": label, "description": content,
+                    "why_matters": "Mirrored from the built-in memory tool "
+                                   "(on_memory_write); the file store remains authoritative.",
+                    "node_kind": "reference", "tags": f"builtin-mirror {target}",
+                })
+        except Exception:
+            pass  # mirror is best-effort; a failed mirror never blocks the file write
+
     # -- tools -----------------------------------------------------------------
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:

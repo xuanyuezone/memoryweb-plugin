@@ -111,6 +111,36 @@ def main() -> int:
     check("sync_turn upserts a transient session-trace node", len(nodes) == 1,
           nodes[0]["id"] if nodes else "(none)")
 
+    # 6b) on_memory_write: built-in memory-tool writes mirror into the graph (#2)
+    fact = "Release checklist: verify dual-remote push before closing issues."
+    old_label = f"hermes-memory: {fact[:60]}"
+
+    def _mirror_nodes(label: str) -> list:
+        m = json.loads(provider.handle_tool_call(
+            "memoryweb_search", {"query": label, "exact": True, "limit": 1}))
+        return (m.get("result") or {}).get("nodes") or []
+
+    provider.on_memory_write("add", "memory", fact, None)
+    time.sleep(3)
+    added = _mirror_nodes(old_label)
+    check("on_memory_write(add) mirrors a built-in write into the graph",
+          len(added) == 1, added[0].get("domain", "(none)") if added else "(none)")
+
+    amended = "Release checklist (amended): verify dual-remote push before closing issues."
+    new_label = f"hermes-memory: {amended[:60]}"
+    provider.on_memory_write("replace", "memory", amended, {"previous_content": fact})
+    time.sleep(3)
+    revised_nodes = _mirror_nodes(new_label)
+    stale_nodes = _mirror_nodes(old_label)
+    check("on_memory_write(replace) revises the mirror in place (label follows)",
+          len(revised_nodes) == 1 and amended in str(revised_nodes[0].get("description", ""))
+          and len(stale_nodes) == 0)
+
+    provider.on_memory_write("remove", "memory", "", {"previous_content": amended})
+    time.sleep(3)
+    check("on_memory_write(remove) archives the mirror via previous_content",
+          len(_mirror_nodes(new_label)) == 0)
+
     # 7) on_pre_compress: durable checkpoint, fail-closed
     db_path = os.environ.get("MEMORYWEB_DB") or os.path.join(hermes_home, ".memoryweb.db")
     checkpoint_dir = os.path.join(os.path.dirname(os.path.abspath(db_path)), "memoryweb-checkpoints")
