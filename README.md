@@ -89,6 +89,35 @@ transient session traces via `sync_turn`, and fail-closed pre-compression
 checkpoints (`compression.checkpoint_required: true` supported). The two modules
 are independent; either or both can be installed.
 
+## Takeover mode (graph as the only memory backend)
+
+`memory.provider: memoryweb` alone is *augmentation*: the built-in memory tool
+keeps MEMORY.md/USER.md as its store — the provider ABC has no storage-backend
+seam (`on_memory_write` is a mirror notification fired after the file write,
+and provider tools may never be named `memory`; both are host invariants).
+Takeover — the graph as the only memory backend, zero built-in memory-file
+writes — is a config recipe:
+
+```yaml
+memory:
+  provider: memoryweb
+  memory_enabled: false
+  user_profile_enabled: false
+```
+
+With both flags off, the built-in store stops mutating MEMORY.md/USER.md, the
+memory tool and its character budgets (2200/1375) disappear from the surface,
+and memory becomes exactly the provider's surfaces: the system-prompt block
+(domain snapshot), prefetch recall, the `memoryweb_*` tools for deliberate
+writes, and transient session traces from `sync_turn`. Files still written by
+the host: the session transcript store (not memory) and the graph's own SQLite
+database plus its pre-compress checkpoints — that is the backend itself.
+
+Keeping the built-in tool name while swapping its backend to the graph is not
+reachable plugin-side; it needs an upstream seam (optional store methods on the
+MemoryProvider ABC, with `memory_tool_store` routing to the active provider
+when it advertises them). See issue #1 for the boundary analysis and sketch.
+
 ## Migrating from a native config block
 
 On a host that already runs memoryweb via `mcp_servers.memoryweb` in `config.yaml`, native
