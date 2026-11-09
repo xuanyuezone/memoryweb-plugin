@@ -66,6 +66,22 @@ def _load_static_tools() -> list[dict[str, Any]]:
     except (OSError, ValueError):
         return []
 
+
+def _package_version() -> str:
+    """Single version source: plugin.json in this plugin directory (#7).
+
+    Every surface that needs a version string (MCP clientInfo, logs, probes)
+    reads it from here; release = bump plugin.json + tag, no other edits.
+    """
+    try:
+        data = json.loads((Path(__file__).resolve().parent / "plugin.json").read_text(encoding="utf-8"))
+        return str(data.get("version") or "0")
+    except (OSError, ValueError):
+        return "0"
+
+
+PROVIDER_VERSION = _package_version()
+
 # Environment variables forwarded to the server process when set in the
 # provider's own environment (never required; the server has its own defaults).
 _PASSTHROUGH_ENV = ("OLLAMA_HOST", "MEMORYWEB_EMBED_MODEL")
@@ -122,7 +138,7 @@ class _StdioServer:
         )
         self._request("initialize", {
             "protocolVersion": PROTOCOL_VERSION, "capabilities": {},
-            "clientInfo": {"name": "hermes-memoryweb-provider", "version": "0.1.0"},
+            "clientInfo": {"name": "hermes-memoryweb-provider", "version": PROVIDER_VERSION},
         })
         self._notify("notifications/initialized")
 
