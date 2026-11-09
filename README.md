@@ -19,16 +19,19 @@ names a hand-written `mcp_servers.memoryweb` config block produces.
 ## Getting the memoryweb binary
 
 This package wraps an existing `memoryweb` MCP server; it ships no server code.
-Build or download one from the upstream project:
+Build or download one from the upstream project — **v1.65.0 or later**: earlier
+binaries ignore `OLLAMA_HOST` for the embedding endpoint (fixed upstream in
+v1.65.0), and remote-Ollama deployments need that fix.
 
 ```bash
 git clone https://github.com/corbym/memoryweb.git
-cd memoryweb && go build -o memoryweb .
+cd memoryweb && git checkout v1.65.0        # version floor; newer tags fine
+go build -o memoryweb .
 install -Dm755 memoryweb ~/.local/bin/memoryweb   # any dir on PATH works
 ```
 
 Prebuilt binaries may also be attached to upstream releases. Verify with
-`memoryweb --version` before enabling the plugin.
+`memoryweb --version` (must report ≥ v1.65.0) before enabling the plugin.
 
 ## Install
 
