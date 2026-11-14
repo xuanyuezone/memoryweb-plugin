@@ -7,7 +7,9 @@
       "env": {
         "MEMORYWEB_DB": "${MEMORYWEB_DB}",
         "OLLAMA_HOST": "${OLLAMA_HOST}",
-        "MEMORYWEB_EMBED_MODEL": "${MEMORYWEB_EMBED_MODEL}"
+        "MEMORYWEB_EMBED_MODEL": "${MEMORYWEB_EMBED_MODEL}",
+        "OLLAMA_API_KEY": "${OLLAMA_API_KEY}",
+        "MEMORYWEB_OLLAMA_API_KEY": "${MEMORYWEB_OLLAMA_API_KEY}"
       }
     }
   }
