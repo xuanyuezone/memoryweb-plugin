@@ -95,7 +95,14 @@ PROVIDER_VERSION = _package_version()
 
 # Environment variables forwarded to the server process when set in the
 # provider's own environment (never required; the server has its own defaults).
-_PASSTHROUGH_ENV = ("OLLAMA_HOST", "MEMORYWEB_EMBED_MODEL")
+# Presence-based: an explicitly-empty MEMORYWEB_OLLAMA_API_KEY forwards as "",
+# preserving the server's opt-out (suppress the OLLAMA_API_KEY fallback).
+_PASSTHROUGH_ENV = (
+    "OLLAMA_HOST",
+    "MEMORYWEB_EMBED_MODEL",
+    "OLLAMA_API_KEY",
+    "MEMORYWEB_OLLAMA_API_KEY",
+)
 
 # Resolution order for the server binary: explicit override, PATH, then
 # well-known install locations. Gateway cold start can run the first agent
@@ -291,7 +298,7 @@ class MemorywebMemoryProvider(MemoryProvider):
             "MEMORYWEB_DB": self._db_path,
         }
         for var in _PASSTHROUGH_ENV:
-            if os.environ.get(var):
+            if var in os.environ:  # presence-based: explicit "" forwards as ""
                 child_env[var] = os.environ[var]
 
         # graph-domain overrides, resolved per instance at initialize (#8)

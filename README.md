@@ -54,6 +54,13 @@ The server environment is pure passthrough; the package hard-codes no paths:
 | `MEMORYWEB_DB` | `~/.memoryweb.db` |
 | `OLLAMA_HOST` | `http://localhost:11434` (semantic search degrades to lexical when unreachable) |
 | `MEMORYWEB_EMBED_MODEL` | server default model |
+| `OLLAMA_API_KEY` | none — Bearer token for gateway-fronted Ollama (memoryweb ≥ v1.65.1) |
+| `MEMORYWEB_OLLAMA_API_KEY` | none — explicit override over `OLLAMA_API_KEY`; set to an empty string to opt out of the fallback |
+
+Credentials belong in the profile `.env` (or an exported shell variable), never
+written literally into `mcp.json`. Note the portable `${VAR}` mechanism drops
+**empty** variables, so the `MEMORYWEB_OLLAMA_API_KEY=""` opt-out is only
+expressible through the provider module (which forwards presence, not truthiness).
 
 Each entry is declared as `"${VAR}"` in `mcp.json`: the value is interpolated from the
 user's shell environment or the profile `.env`, and an unset variable is dropped entirely
@@ -106,6 +113,8 @@ Provider environment (all optional):
 | `MEMORYWEB_DB` | `<hermes_home>/.memoryweb.db` |
 | `OLLAMA_HOST` | server default (`http://localhost:11434`) |
 | `MEMORYWEB_EMBED_MODEL` | server default model |
+| `OLLAMA_API_KEY` | none — forwarded to the server for gateway-fronted Ollama (Bearer) |
+| `MEMORYWEB_OLLAMA_API_KEY` | none — explicit override; an explicitly empty value forwards as empty and suppresses the `OLLAMA_API_KEY` fallback (presence-based forwarding) |
 | `MEMORYWEB_DOMAIN_MEMORY` | `hermes/memory` (mirror domain for built-in `target='memory'` writes) |
 | `MEMORYWEB_DOMAIN_USER` | `user-profile` (mirror domain for `target='user'` writes) |
 | `MEMORYWEB_DOMAIN_SESSIONS` | `hermes/sessions` (transient session-trace domain) |
