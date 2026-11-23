@@ -555,3 +555,223 @@ class MemorywebMemoryProvider(MemoryProvider):
                 return json.dumps({"result": text}, ensure_ascii=False)
         except Exception as exc:
             return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+# ── Background-review prompt override ────────────────────────────────────────
+#
+# agent/background_review.py picks each review fork's prompt with
+# ``getattr(agent, name, globals()[name])`` on the SESSION agent: instance dict
+# first, then the AIAgent class attribute (run_agent.py imports the three
+# module constants into the class body), then the module fallback. The class
+# attribute is the surface a plugin can reach — no plugin seam receives the
+# session agent instance itself — and setattr on it is picked up by every
+# agent's getattr, while a per-instance setattr can still shadow it.
+#
+# Swapped only when the plugin's memory face is active (memory.provider names
+# this plugin, or a memoryweb MCP server is registered); otherwise the official
+# prompts stay untouched. All imports are lazy and every step fails silent back
+# to the official prompts — the review loop must never die on this hook.
+#
+# Note for operators: the review fork dispatches behind
+# ``auxiliary.background_review.extra_tools`` — list the memoryweb tool names
+# there so the fork may actually call what these prompts direct it to use.
+
+_MEMORYWEB_MEMORY_REVIEW_PROMPT = (
+    "Review the conversation above and consider filing durable facts into memory if appropriate.\n\n"
+    "Memory lives behind the memoryweb tools — read with memoryweb_search / memoryweb_recall / "
+    "memoryweb_orient, write with memoryweb_remember / memoryweb_revise / memoryweb_connect. "
+    "File findings there; do not write USER.md or MEMORY.md.\n\n"
+    "• SEARCH BEFORE FILING: recall what already exists for the subject. Strengthen or clarify "
+    "the existing entry (memoryweb_revise) instead of appending a duplicate (memoryweb_remember); "
+    "the update-or-create call is yours to make. Connect genuinely related entries "
+    "(memoryweb_connect) rather than restating one inside the other.\n"
+    "• ONE fact goes in ONE place — never both a new entry and an edit of an old one carrying "
+    "the same fact. Duplicates crowd out what matters and split future searches.\n"
+    "• Save only facts GROUNDED in this conversation — a user message or tool result you can "
+    "point to. Never infer the user's traits, skill level, role, mood or preferences from topic, "
+    "tone or tools used, and never turn a one-off request into a standing preference unless the "
+    "user marked it general ('always', 'from now on', 'remember') or stated a standing "
+    "like/dislike. If unsure, leave it out — a wrong fact misleads every future session.\n"
+    "• Both stores of old are one surface now: who the user is (persona, preferences, "
+    "communication and work style) and durable environment facts (tool quirks, project "
+    "conventions, config gotchas, paths and endpoints) all file through the same tools — pick "
+    "the fitting domain when you file.\n\n"
+    "If something stands out, file it once, in the right place, with the memoryweb tools. "
+    "If nothing is worth filing, just say 'Nothing to save.' and stop."
+)
+
+_MEMORYWEB_SKILLS_REVIEW_PROMPT = (
+    "Review the conversation above and update the skill library. Be ACTIVE — most sessions "
+    "produce at least one skill update, even if small. A pass that does nothing is a missed "
+    "learning opportunity, not a neutral outcome.\n\n"
+    "Target shape of the library: CLASS-LEVEL skills, each with a SKILL.md of always-on rules "
+    "and a small references/ set of topical depth — not a flat list of narrow one-session "
+    "skills, and not an umbrella hoarding a references/ file per session. This shapes HOW you "
+    "update, not WHETHER you update.\n\n"
+    "What a skill IS: the instructions for doing a class of task the most efficient and correct "
+    "way, to THIS user's specifications — the procedure, the tools and commands that work, the "
+    "order, the user's preferences for how the result should look, and the pitfalls that cost "
+    "time. A future session should be able to follow it and produce what the user wants on the "
+    "first try.\n"
+    "• Procedure first: steps in the order they are done, with the concrete commands, tool "
+    "calls, and decision points. Pitfalls attach to the step they affect; a pitfall is a "
+    "generalizable rule + one clause of WHY, imperative — not a narrative of this session.\n"
+    "• No PR/issue numbers, dates, ticket IDs or quoted user text as content — the rule must "
+    "stand without the incident behind it.\n"
+    "• The same lesson learned twice is ONE rule: search the skill (and its references/) for "
+    "the rule already stated and strengthen it rather than appending a second copy. Fix the "
+    "skill in place when it is wrong — edit the sentence that misled, do not append "
+    "'UPDATE: actually...' underneath it.\n\n"
+    "Signals to look for (any one warrants action):\n"
+    "• User corrected your style, tone, format, legibility, verbosity, workflow, or sequence of "
+    "steps — frustration signals like 'stop doing X', 'this is too verbose', 'just give me the "
+    "answer', or an explicit 'remember this'. Encode the correction in the skill that governs "
+    "that class of task so the next session starts already knowing.\n"
+    "• Non-trivial technique, fix, workaround, debugging path, or tool-usage pattern emerged "
+    "that a future session would benefit from.\n"
+    "• A skill loaded or consulted this session turned out wrong, missing a step, or outdated — "
+    "patch it NOW.\n\n"
+    "Preference order — prefer the earliest action that fits:\n"
+    "1. UPDATE A CURRENTLY-LOADED SKILL (re-load it with skill_view during this review — see "
+    "Read-before-write). Whoever wrote it: hand-written, installed, bundled and pinned skills "
+    "are all yours to improve; only a skill the user LOCKED (`hermes curator lock`) is off "
+    "limits — put the suggested change in your summary instead.\n"
+    "2. UPDATE AN EXISTING UMBRELLA (skills_list + skill_view), adding a subsection, a pitfall, "
+    "or a broader trigger.\n"
+    "3. ADD A SUPPORT FILE under an existing umbrella via skill_manage action=write_file — "
+    "references/<topic>.md for topical depth (extend an existing file first, never a per-session "
+    "file), templates/ for starter files meant to be copied, scripts/ for statically re-runnable "
+    "actions. Add a one-line pointer in SKILL.md so future agents find it.\n"
+    "4. CREATE A NEW CLASS-LEVEL UMBRELLA when nothing covers the class. The name MUST be at "
+    "the class level — not a PR number, error string, codename, or 'fix-X / debug-Y' session "
+    "artifact; if it only fits today's task, fall back to (1)–(3).\n\n"
+    "Read-before-write (ENFORCED — skill_manage refuses otherwise): before patching or editing "
+    "an existing skill's SKILL.md, call skill_view(name) during this review; before overwriting "
+    "or removing an EXISTING supporting file, call skill_view(name, file_path=...) for that "
+    "exact file. Earlier transcript quotes do not count. On a refusal: view the named target "
+    "once, retry the write once, do not loop.\n\n"
+    "User-preference embedding: when the user expressed a style/format/workflow preference, the "
+    "update belongs in the SKILL.md body of the skill governing that task. Cross-cutting "
+    "preferences no skill owns go to memory via the memoryweb tools "
+    "(memoryweb_remember / memoryweb_revise) — one place per lesson, never both. Skills say "
+    "'how to do this class of task for this user'; memory says who the user is and what holds "
+    "true of the environment.\n\n"
+    "Do NOT capture as skills (these become persistent self-imposed constraints that bite "
+    "later): environment-dependent failures (missing binaries, unconfigured credentials — the "
+    "user can fix these); negative claims about tools or features ('X is broken'); transient "
+    "errors that resolved before the conversation ended; one-off task narratives; and "
+    "unresolved failures — never dress up a sequence of dead ends as a 'reliable workflow'. If "
+    "a tool failed on setup state, capture the FIX under an existing setup or troubleshooting "
+    "skill, not the failure. If you notice two overlapping skills, note it in your reply — the "
+    "background curator consolidates; never delete a skill here.\n\n"
+    "'Nothing to save.' is a real option but should NOT be the default. If the session ran "
+    "smoothly with no corrections and produced no new technique, just say 'Nothing to save.' "
+    "and stop. Otherwise, act."
+)
+
+_MEMORYWEB_COMBINED_REVIEW_PROMPT = (
+    "Review the conversation above and update two things.\n\n"
+    "**Memory**: lives behind the memoryweb tools — read with memoryweb_search / "
+    "memoryweb_recall / memoryweb_orient, write with memoryweb_remember / memoryweb_revise / "
+    "memoryweb_connect. File findings there; do not write USER.md or MEMORY.md.\n"
+    "• SEARCH BEFORE FILING: recall what already exists; strengthen or clarify the existing "
+    "entry (memoryweb_revise) instead of appending a duplicate (memoryweb_remember); the "
+    "update-or-create call is yours to make. Connect genuinely related entries "
+    "(memoryweb_connect) rather than restating one inside the other.\n"
+    "• ONE fact goes in ONE place — never both a new entry and an edit of an old one carrying "
+    "the same fact.\n"
+    "• Save only facts GROUNDED in this conversation — a user message or tool result you can "
+    "point to. Never infer the user's traits, skill level, role, mood or preferences from topic, "
+    "tone or tools used, and never turn a one-off request into a standing preference unless the "
+    "user marked it general ('always', 'from now on', 'remember'). If unsure, leave it out.\n"
+    "• Who the user is (persona, preferences, work style) and durable environment facts (tool "
+    "quirks, project conventions, config gotchas, paths, endpoints) all file through the same "
+    "tools — pick the fitting domain when you file.\n\n"
+    "**Skills**: how to do this class of task. Be ACTIVE — most sessions produce at least one "
+    "skill update; a pass that does nothing is a missed learning opportunity, not a neutral "
+    "outcome. Target shape: CLASS-LEVEL skills with a SKILL.md of always-on rules and a small "
+    "references/ set of topical depth. Procedure first, pitfalls as generalizable rules with "
+    "one clause of WHY; no PR numbers, dates or incident narration; the same lesson learned "
+    "twice is ONE rule — strengthen, don't duplicate; fix wrong sentences in place.\n\n"
+    "Signals (either dimension): user corrected style/tone/format/verbosity/approach — embed it "
+    "in the skill governing that task so the next session starts fixed; a non-trivial "
+    "technique, fix, workaround or debugging path emerged; a loaded skill turned out wrong, "
+    "missing or outdated — patch it now; a durable grounded fact about the user or environment "
+    "surfaced — file it into memory.\n\n"
+    "Preference order for skills — earliest that fits: (1) update a currently-loaded skill "
+    "(re-load with skill_view first — read-before-write is ENFORCED, one view + one retry on "
+    "refusal, no loop); (2) update an existing umbrella (skills_list + skill_view); (3) add a "
+    "support file under an umbrella via skill_manage action=write_file (references/ for depth, "
+    "templates/ for starters, scripts/ for re-runnable actions; one-line pointer in SKILL.md); "
+    "(4) create a new class-level umbrella only when nothing covers the class — the name must "
+    "sit at the class level, never a session artifact. Locked skills are off limits; suggest "
+    "the change in your summary instead. Never delete a skill; note overlaps for the curator.\n\n"
+    "User-preference embedding: a preference lesson lives in exactly ONE place — the skill that "
+    "governs the task when one exists; cross-cutting preferences no skill owns go to memory via "
+    "the memoryweb tools. Never both.\n\n"
+    "Do NOT capture as skills: environment-dependent failures (missing binaries, unconfigured "
+    "credentials), negative claims about tools ('X is broken'), transient errors that resolved, "
+    "one-off task narratives, unresolved failure sequences dressed up as workflows — capture the "
+    "FIX under an existing setup skill, not the failure.\n\n"
+    "Act on whichever dimension has real signal. If genuinely nothing stands out on either, say "
+    "'Nothing to save.' and stop — but don't reach for that conclusion as a default."
+)
+
+# AIAgent class-attribute names (background_review._PROMPT_NAME_BY_SCOPE values).
+_REVIEW_PROMPT_OVERRIDES = {
+    "_MEMORY_REVIEW_PROMPT": _MEMORYWEB_MEMORY_REVIEW_PROMPT,
+    "_SKILLS_REVIEW_PROMPT": _MEMORYWEB_SKILLS_REVIEW_PROMPT,
+    "_COMBINED_REVIEW_PROMPT": _MEMORYWEB_COMBINED_REVIEW_PROMPT,
+}
+
+
+def _memoryweb_memory_face_active() -> bool:
+    """True when this plugin's memory face is in play for the process.
+
+    memory.provider naming this plugin (the provider face) or a registered
+    memoryweb MCP server (the portable face) both count: either way the
+    session surface carries the memoryweb tools these prompts direct to.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config() or {}
+    except Exception:
+        return False
+    memory = cfg.get("memory")
+    if isinstance(memory, dict) and str(memory.get("provider") or "").strip().lower() == "memoryweb":
+        return True
+    mcp = cfg.get("mcp_servers")
+    return isinstance(mcp, dict) and "memoryweb" in mcp
+
+
+def _install_review_prompt_overrides() -> list:
+    """Swap the AIAgent review-prompt class attributes to the memoryweb texts.
+
+    Returns the attribute names actually installed (diagnostics/testing).
+    Fail-silent per attribute: an AttributeError keeps the remaining swaps and
+    the official prompt for the missing name.
+    """
+    try:
+        from run_agent import AIAgent
+    except Exception:
+        return []
+    installed = []
+    for name, text in _REVIEW_PROMPT_OVERRIDES.items():
+        try:
+            setattr(AIAgent, name, text)
+            installed.append(name)
+        except Exception:
+            continue
+    return installed
+
+
+def register(ctx) -> dict:
+    """Native-plugin registration hook (PluginManager calls this at load).
+
+    Installs the background-review prompt override when the memory face is
+    active. Idempotent; returns a small diagnostics dict for tests and logs.
+    """
+    active = _memoryweb_memory_face_active()
+    installed = _install_review_prompt_overrides() if active else []
+    return {"memory_face_active": active, "review_prompts_installed": installed}
