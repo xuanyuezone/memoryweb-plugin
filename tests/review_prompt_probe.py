@@ -28,10 +28,22 @@ def check(name, cond, detail=""):
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "on"
-    from plugins.memoryweb import (
-        _REVIEW_PROMPT_OVERRIDES,
-        register,
-    )
+    # ON: import the installed copy under $HERMES_HOME/plugins/<name> (the
+    # shape PluginManager loads). OFF: import the source tree, but with
+    # HERMES_HOME pointing at a profile whose config lacks the memory face —
+    # proving the module can be loaded while the guard refuses the swap.
+    import os
+
+    if mode == "on":
+        sys.path.insert(0, os.path.join(os.environ.get("HERMES_HOME", ""), "plugins"))
+    else:
+        # source copy at a path whose leaf dir is literally named "memoryweb"
+        # (import by package name requires it)
+        sys.path.insert(0, os.environ.get("OFF_SRC", "/tmp/off-src"))
+    import memoryweb as mw
+
+    register = mw.register
+    _REVIEW_PROMPT_OVERRIDES = mw._REVIEW_PROMPT_OVERRIDES
 
     diag = register(None)
     installed = diag.get("review_prompts_installed") or []
@@ -46,16 +58,14 @@ def main() -> int:
         from run_agent import AIAgent
 
         # 2. the live selection path (returns (target, prompt); target not run).
+        # Resolve the attribute name from the runtime's OWN scope map —
+        # v0.23.0 and v0.23.3 spell the skills name differently.
         agent = object.__new__(AIAgent)  # bare instance: no __init__, class attrs visible
-        for scope, expected in (
-            ((True, False), "_MEMORY_REVIEW_PROMPT"),
-            ((False, True), "_SKILLS_REVIEW_PROMPT"),
-            ((True, True), "_COMBINED_REVIEW_PROMPT"),
-        ):
+        for scope in ((True, False), (False, True), (True, True)):
             _target, prompt = br.spawn_background_review_thread(
                 agent, [], review_memory=scope[0], review_skills=scope[1])
-            check(f"spawn scope {scope} picks the plugin prompt",
-                  prompt == _REVIEW_PROMPT_OVERRIDES[expected])
+            expected = _REVIEW_PROMPT_OVERRIDES.get(br._PROMPT_NAME_BY_SCOPE[scope])
+            check(f"spawn scope {scope} picks the plugin prompt", prompt == expected)
 
         # 3. class-attribute hit through instance getattr.
         for name, text in _REVIEW_PROMPT_OVERRIDES.items():
