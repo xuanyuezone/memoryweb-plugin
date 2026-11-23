@@ -130,6 +130,37 @@ shares one mapping.
 > and reinstall). An untracked hand-copied `__init__.py` blocks the update and
 > keeps the old code running.
 
+## Background-review prompt override
+
+When the memory face is active (`memory.provider: memoryweb`, or a registered
+`mcp_servers.memoryweb` entry), the plugin's `register()` hook also swaps the
+three background-review prompts (`_MEMORY_REVIEW_PROMPT`, `_SKILLS_REVIEW_PROMPT`,
+`_COMBINED_REVIEW_PROMPT`) on the `AIAgent` class — the override surface
+`agent/background_review.py` documents for them. The review fork is then told to
+file findings through the memoryweb tools (`memoryweb_search` / `recall` /
+`orient` to read, `remember` / `revise` / `connect` to write) instead of writing
+USER.md/MEMORY.md. Without the memory face — or if any runtime symbol moves —
+the official prompts stay in place (guarded, lazy, fail-silent).
+
+One operator step is required for the fork to actually *call* those tools:
+review-fork dispatch is whitelisted, so list the tool names under
+`auxiliary.background_review.extra_tools`:
+
+```yaml
+auxiliary:
+  background_review:
+    extra_tools:
+      - memoryweb_search
+      - memoryweb_recall
+      - memoryweb_orient
+      - memoryweb_remember
+      - memoryweb_revise
+      - memoryweb_connect
+```
+
+Reproduce the verification with `python3 tests/review_prompt_probe.py on|off`
+inside the acceptance container (see Testing below).
+
 ## Takeover mode (graph as the only memory backend)
 
 `memory.provider: memoryweb` alone is *augmentation*: the built-in memory tool
