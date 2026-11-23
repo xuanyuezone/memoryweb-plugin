@@ -717,10 +717,15 @@ _MEMORYWEB_COMBINED_REVIEW_PROMPT = (
     "'Nothing to save.' and stop — but don't reach for that conclusion as a default."
 )
 
-# AIAgent class-attribute names (background_review._PROMPT_NAME_BY_SCOPE values).
+# AIAgent class-attribute names. NOTE the runtime's own naming is
+# inconsistent across versions: the scope map looks up "_SKILLS_REVIEW_PROMPT"
+# (plural) while run_agent.py imports the module constant as
+# "_SKILL_REVIEW_PROMPT" (singular) into the class — so both spellings are
+# installed to cover either lookup.
 _REVIEW_PROMPT_OVERRIDES = {
     "_MEMORY_REVIEW_PROMPT": _MEMORYWEB_MEMORY_REVIEW_PROMPT,
     "_SKILLS_REVIEW_PROMPT": _MEMORYWEB_SKILLS_REVIEW_PROMPT,
+    "_SKILL_REVIEW_PROMPT": _MEMORYWEB_SKILLS_REVIEW_PROMPT,
     "_COMBINED_REVIEW_PROMPT": _MEMORYWEB_COMBINED_REVIEW_PROMPT,
 }
 
