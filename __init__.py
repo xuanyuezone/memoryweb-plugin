@@ -31,6 +31,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Optional
 
@@ -47,6 +48,25 @@ PROTOCOL_VERSION = "2025-06-18"
 DEFAULT_TRACE_DOMAIN = "hermes/sessions"
 DEFAULT_MIRROR_DOMAINS = {"memory": "hermes/memory", "user": "user-profile"}
 _CHECKPOINT_DIRNAME = "memoryweb-checkpoints"
+_CHECKPOINT_STAGING_PREFIX = ".memoryweb-checkpoint-"
+# Retention (iss #11, ruled feature-level): on_pre_compress snapshots need a
+# lifecycle or the directory grows without bound. Two conditions form the
+# defense: keep the newest _CHECKPOINT_KEEP snapshots (recovery-point floor —
+# they survive even if every one of them is past the age window), and delete
+# anything past _CHECKPOINT_MAX_AGE_DAYS that the floor does not protect.
+# With (5, 14d) the count cap is the tighter bound under any mtime ordering,
+# so the age condition is defense-in-depth — it stays operative if the keep
+# count is ever raised past what a 14-day window accumulates.
+_CHECKPOINT_KEEP = 5
+_CHECKPOINT_MAX_AGE_DAYS = 14
+# Staging leftovers: the two-stage commit stages a snapshot in the db dir and
+# atomically moves it; a crash between create and move leaves a stray. Anything
+# matching the staging pattern older than this grace is swept (in-flight moves
+# finish in well under the 120s backup timeout; an hour-old staging file is
+# definitively abandoned). The os.replace-fallback case (a snapshot deliberately
+# left at the staging name) is swept with it — acceptable under the same
+# retention intent: old recovery points go.
+_CHECKPOINT_STAGING_GRACE_SECONDS = 3600
 
 # Graph-domain overrides (unset = defaults above). Env-based so any deployment
 # can fold mirrors into existing domains or isolate multi-instance hosts; note
@@ -230,6 +250,61 @@ class _StdioServer:
         if isinstance(result, dict) and isinstance(result.get("content"), list):
             return "".join(c.get("text", "") for c in result["content"] if isinstance(c, dict))
         return json.dumps(result, ensure_ascii=False)
+
+
+def _prune_checkpoint_artifacts(db_dir: Path) -> dict[str, int]:
+    """Enforce the checkpoint retention policy (iss #11) under ``db_dir``.
+
+    Snapshots in ``memoryweb-checkpoints/``: keep the newest
+    ``_CHECKPOINT_KEEP`` unconditionally (recovery-point floor), delete
+    everything the floor does not protect once it is past
+    ``_CHECKPOINT_MAX_AGE_DAYS``. With (5, 14d) the floor is the tighter
+    bound, so the age condition is defense-in-depth for a future larger
+    keep-count; both predicates are enforced explicitly so the intent is
+    auditable.
+
+    Staging leftovers: ``.memoryweb-checkpoint-*`` files in ``db_dir`` older
+    than ``_CHECKPOINT_STAGING_GRACE_SECONDS`` are swept — an in-flight
+    two-stage move finishes in well under the 120s backup timeout, so an
+    hour-old staging file is definitively abandoned (the rare
+    os.replace-fallback snapshot left at the staging name is swept with it,
+    under the same retention intent).
+
+    Returns ``{"snapshots_removed": n, "strays_removed": m}`` (diagnostics;
+    failures raise to the caller, which treats pruning as fail-open).
+    """
+    now = time.time()
+    removed = {"snapshots_removed": 0, "strays_removed": 0}
+
+    checkpoint_dir = db_dir / _CHECKPOINT_DIRNAME
+    snapshots: list[Path] = []
+    if checkpoint_dir.is_dir():
+        snapshots = sorted(
+            (p for p in checkpoint_dir.iterdir() if p.is_file()),
+            key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)  # newest first
+    max_age_s = _CHECKPOINT_MAX_AGE_DAYS * 86400
+    # A snapshot is a deletion candidate when it is beyond the keep-floor OR
+    # past the age window; the floor then rescues the newest candidates so
+    # the total never drops below min(_CHECKPOINT_KEEP, len(snapshots)).
+    candidates = [
+        p for rank, p in enumerate(snapshots)
+        if rank >= _CHECKPOINT_KEEP or (now - p.stat().st_mtime) > max_age_s
+    ]
+    floor = min(_CHECKPOINT_KEEP, len(snapshots))
+    rescued = max(0, floor - (len(snapshots) - len(candidates)))
+    # candidates are newest-first: skip the newest `rescued` of them so the
+    # total stays at the floor, delete the rest.
+    for p in candidates[rescued:]:
+        with suppress(OSError):
+            p.unlink()
+            removed["snapshots_removed"] += 1
+
+    for stray in db_dir.glob(_CHECKPOINT_STAGING_PREFIX + "*"):
+        with suppress(OSError):
+            if stray.is_file() and (now - stray.stat().st_mtime) > _CHECKPOINT_STAGING_GRACE_SECONDS:
+                stray.unlink()
+                removed["strays_removed"] += 1
+    return removed
 
 
 class MemorywebMemoryProvider(MemoryProvider):
@@ -451,6 +526,11 @@ class MemorywebMemoryProvider(MemoryProvider):
             os.replace(staging, destination)  # same directory -> same filesystem
         except OSError:
             destination = staging  # durable where it is; never claim a lost path
+        # Lifecycle: prune after the commit — fail-open on purpose, the exact
+        # opposite of the fail-closed commit above (a retention hiccup must
+        # never cost the checkpoint that was just promised).
+        with suppress(Exception):
+            _prune_checkpoint_artifacts(db_dir)
         return (
             f"memoryweb checkpoint committed before compression: session "
             f"{self._session_id}, {len(messages)} messages archived-context at "
