@@ -9,7 +9,7 @@ CPython 3.9+ exist.
 
 Usage:
     python3 tests/make_demo_db.py --db tests/data/demo.db
-    python3 tests/make_demo_db.py --db /tmp/demo.db --binary /opt/mcp/memoryweb/memoryweb
+    python3 tests/make_demo_db.py --db /tmp/demo.db --binary /usr/local/bin/memoryweb
 
 The target file (and its -wal/-sidecars) is removed first, so re-running
 always yields an identical fixture.
