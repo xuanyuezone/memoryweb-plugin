@@ -232,11 +232,6 @@ class _StdioServer:
         return json.dumps(result, ensure_ascii=False)
 
 
-def register(ctx) -> None:
-    """Directory-provider entry point (``plugins/memory`` loader contract)."""
-    ctx.register_memory_provider(MemorywebMemoryProvider())
-
-
 class MemorywebMemoryProvider(MemoryProvider):
     """MemoryProvider backed by a local memoryweb stdio server."""
 
@@ -780,11 +775,32 @@ def _install_review_prompt_overrides() -> list:
 
 
 def register(ctx) -> dict:
-    """Native-plugin registration hook (PluginManager calls this at load).
+    """Registration entry point — called by BOTH loader paths.
 
-    Installs the background-review prompt override when the memory face is
-    active. Idempotent; returns a small diagnostics dict for tests and logs.
+    ``plugins/memory``'s directory-provider contract: the loader imports the
+    package and calls ``register(ctx)`` with a collector context whose
+    ``register_memory_provider`` hands it the provider instance (failing
+    that, the loader falls back to instantiating a top-level MemoryProvider
+    subclass — a fallback this hook keeps us off). The general PluginManager
+    calls the same function with a PluginContext, where
+    ``register_memory_provider`` is an inert recording (activation stays
+    owned by ``memory.provider``). The background-review prompt override
+    (iss #10) runs in both cases; provider registration is skipped when no
+    ctx is supplied (probe/diagnostic use).
+
+    Idempotent; returns a small diagnostics dict for tests and logs.
     """
+    registered = False
+    if ctx is not None and hasattr(ctx, "register_memory_provider"):
+        try:
+            ctx.register_memory_provider(MemorywebMemoryProvider())
+            registered = True
+        except Exception:
+            registered = False
     active = _memoryweb_memory_face_active()
     installed = _install_review_prompt_overrides() if active else []
-    return {"memory_face_active": active, "review_prompts_installed": installed}
+    return {
+        "memory_provider_registered": registered,
+        "memory_face_active": active,
+        "review_prompts_installed": installed,
+    }
