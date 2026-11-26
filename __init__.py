@@ -132,7 +132,6 @@ _PASSTHROUGH_ENV = (
 _COMMAND_CANDIDATES = (
     "~/.local/bin/memoryweb",
     "/usr/local/bin/memoryweb",
-    "/opt/mcp/memoryweb/memoryweb",
 )
 
 
@@ -343,7 +342,7 @@ class MemorywebMemoryProvider(MemoryProvider):
 
     def unavailable_reason(self) -> str:
         return ("memoryweb binary not found — set MEMORYWEB_BIN, put it on PATH, or "
-                "install it under ~/.local/bin, /usr/local/bin or /opt/mcp/memoryweb "
+                "install it under ~/.local/bin or /usr/local/bin "
                 "to activate this provider.")
 
     def initialize(self, session_id: str, **kwargs) -> None:

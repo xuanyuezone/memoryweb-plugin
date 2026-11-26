@@ -109,7 +109,7 @@ Provider environment (all optional):
 
 | Variable | Default when unset |
 |---|---|
-| `MEMORYWEB_BIN` | PATH, then `~/.local/bin/`, `/usr/local/bin/`, `/opt/mcp/memoryweb/` |
+| `MEMORYWEB_BIN` | PATH, then `~/.local/bin/`, `/usr/local/bin/` |
 | `MEMORYWEB_DB` | `<hermes_home>/.memoryweb.db` |
 | `OLLAMA_HOST` | server default (`http://localhost:11434`) |
 | `MEMORYWEB_EMBED_MODEL` | server default model |
