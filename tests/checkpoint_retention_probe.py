@@ -72,6 +72,8 @@ def main() -> int:
         check("the oldest beyond the floor is the one removed", "pre-compress-a5.db" not in left)
 
         print("== B: 5 fresh + 4 expired -> expired cleaned ==")
+        for p in ckdir.iterdir():
+            p.unlink()
         for i in range(5):
             snap(ckdir, f"pre-compress-b-f{i}.db", age_days=i)
         for i in range(4):
