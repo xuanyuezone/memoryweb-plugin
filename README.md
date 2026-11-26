@@ -156,7 +156,20 @@ auxiliary:
       - memoryweb_remember
       - memoryweb_revise
       - memoryweb_connect
+      - memoryweb_suggest_connections
 ```
+
+The prompt states only the imperative; the reasoning behind it:
+
+- `suggest_connections` returns **candidates and hints, not directives** — the
+  review agent is the sole judge in this automated pass and evaluates each
+  candidate before connecting: semantic substance (not lexical or tag
+  overlap), genuine relatedness to the entry's subject, correct direction.
+- **Zero connections is a legal and common outcome.** The default posture is
+  skeptical scrutiny — never connect merely because it was proposed; an edge
+  that says nothing waters the graph down; when unsure, leave it unconnected.
+- The accept/reject **reason is written into the connect `narrative`**, so the
+  judgment stays traceable after the fact.
 
 Reproduce the verification with `python3 tests/review_prompt_probe.py on|off`
 inside the acceptance container (see Testing below).
