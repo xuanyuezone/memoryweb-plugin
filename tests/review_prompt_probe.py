@@ -78,11 +78,32 @@ def main() -> int:
             agent, [], review_memory=True, review_skills=False)
         check("per-instance setattr shadows the class override", prompt == "per-agent custom")
 
-        # 5. the swapped texts must not teach the file stores.
+        # 5. the swapped texts must not teach the file stores, and must teach
+        #    the suggest_connections discipline (iss #13: a whitelisted tool no
+        #    prompt mentions is a tool that never runs). Minimal imperative
+        #    form, official-prompt style; the rationale lives in the README.
+        mem = _REVIEW_PROMPT_OVERRIDES["_MEMORY_REVIEW_PROMPT"]
+        comb = _REVIEW_PROMPT_OVERRIDES["_COMBINED_REVIEW_PROMPT"]
+        sk = _REVIEW_PROMPT_OVERRIDES["_SKILLS_REVIEW_PROMPT"]
         check("memory prompt does not direct file writes",
-              "do not write USER.md or MEMORY.md" in _REVIEW_PROMPT_OVERRIDES["_MEMORY_REVIEW_PROMPT"])
+              "do not write USER.md or MEMORY.md" in mem)
         check("combined prompt does not direct file writes",
-              "do not write USER.md or MEMORY.md" in _REVIEW_PROMPT_OVERRIDES["_COMBINED_REVIEW_PROMPT"])
+              "do not write USER.md or MEMORY.md" in comb)
+        for label, text in (("memory", mem), ("skills", sk), ("combined", comb)):
+            check(f"{label} prompt names memoryweb_suggest_connections",
+                  "memoryweb_suggest_connections" in text)
+        check("calling order: after filing a new entry",
+              "After filing a new entry" in mem and "After filing a new entry" in comb)
+        check("results framed as hints (candidates, not directives — agent judges)",
+              "Treat results as hints" in mem and "Treat results as hints" in comb
+              and "hints" in sk)
+        check("connect only genuinely related entries",
+              "only entries genuinely related" in mem and "only entries genuinely related" in comb)
+        check("the reason must be recorded in the narrative",
+              "recording the reason in the narrative" in mem
+              and "recording the reason in the narrative" in comb)
+        check("no verbose rationale left in the runtime prompts",
+              "waters the graph down" not in mem and "legal and common" not in mem)
     else:
         check("memory face detected as inactive", active is False, f"diag={diag}")
         check("no prompts installed", installed == [], f"installed={installed}")
