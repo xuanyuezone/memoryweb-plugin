@@ -20,6 +20,12 @@ What each surface does:
   backup`` snapshot is committed under ``memoryweb-checkpoints/`` next to the
   database BEFORE returning; any failure raises (fail-closed) so a required
   checkpoint blocks the lossy rewrite instead of silently skipping.
+- handle_tool_call: ``forget``/``forget_all`` interception — forgetting a
+  ``builtin-mirror`` node also removes the MEMORY.md/USER.md entry it
+  documented, through the native store's own remove semantics (best-effort,
+  primary contexts only). This closes the delete direction of the mirror:
+  on_memory_write mirrors built-in writes into the graph, this mirrors
+  graph-side forgets back into the files (iss #15).
 """
 
 from __future__ import annotations
@@ -77,6 +83,34 @@ _DOMAIN_ENV = {
     "user": "MEMORYWEB_DOMAIN_USER",
     "sessions": "MEMORYWEB_DOMAIN_SESSIONS",
 }
+
+# Forget-mirror sync (iss #15): the write direction mirrors built-in memory
+# writes into the graph (on_memory_write); this closes the delete direction —
+# forgetting a graph-side mirror node removes the MEMORY.md/USER.md entry it
+# documented. Mirror nodes are identified by BOTH the tag token _mirror_write
+# stamps and the label prefix; the file removal itself runs through the native
+# MemoryStore (resolve + fold-compare, then lock + re-read + unique-match), so
+# it is exactly as precise as an in-agent `memory` remove and can never splice
+# an entry the mirror did not document.
+_FORGET_TOOLS = ("forget", "forget_all")
+_MIRROR_TAG_TOKEN = "builtin-mirror"
+_MIRROR_TARGETS = tuple(DEFAULT_MIRROR_DOMAINS)  # ("memory", "user")
+# forget_all above this size skips the file sync: each id costs a recall round
+# trip, and a deletion batch that large is an audit/purge operation, not a
+# mirror bookkeeping event.
+_MIRROR_SYNC_BATCH_CAP = 50
+
+# Typography folding for the mirror-vs-file comparison, mirroring the native
+# store's old_text matching: quotes/backticks -> ', dashes -> '-', whitespace
+# runs -> one space, a literal "\n" -> space. Content round-tripped through a
+# mirror node still compares equal after a model re-typed it.
+_MATCH_FOLD_TABLE = str.maketrans({
+    **dict.fromkeys("\"`\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f", "'"),
+    **dict.fromkeys("\u2010\u2011\u2012\u2013\u2014\u2015\u2212", "-")})
+
+
+def _fold_for_match(text: str) -> str:
+    return " ".join(str(text).replace("\\n", " ").translate(_MATCH_FOLD_TABLE).split())
 
 # Frozen tool table (name/description/inputSchema from memoryweb v1.65.0's
 # tools/list, see static_tools.json). MemoryManager builds its dispatch routing
@@ -600,6 +634,110 @@ class MemorywebMemoryProvider(MemoryProvider):
         except Exception:
             pass  # mirror is best-effort; a failed mirror never blocks the file write
 
+    # -- forget-mirror sync (handle_tool_call interception, iss #15) -----------
+
+    @staticmethod
+    def _classify_mirror_node(node: Any) -> Optional[str]:
+        """``"memory"``/``"user"`` when the node is a builtin-mirror node this
+        provider wrote (tag token AND label prefix must agree), else None.
+        Only nodes passing this double check may drive a file-store removal —
+        a plain graph node's forget never touches MEMORY.md/USER.md."""
+        if not isinstance(node, dict):
+            return None
+        tokens = str(node.get("tags") or "").split()
+        label = str(node.get("label") or "")
+        for target in _MIRROR_TARGETS:
+            if (_MIRROR_TAG_TOKEN in tokens and target in tokens
+                    and label.startswith(f"hermes-{target}:")):
+                return target
+        return None
+
+    def _plan_forget_sync(self, server_tool: str, args: dict[str, Any]) -> list[tuple[str, str]]:
+        """Recall the nodes a forget/forget_all is about to archive and keep the
+        builtin-mirror ones as ``(target, description)`` plans. Must run BEFORE
+        the server call: recall reaches live nodes only, and a successful forget
+        archives them. ``restore=true`` is an un-archive and never plans a
+        deletion. Best-effort: any failure returns [] and the forget stays
+        sync-free — planning must never alter the forget's own outcome."""
+        try:
+            if server_tool == "forget":
+                if args.get("restore"):
+                    return []
+                ids = [str(args.get("id") or "")]
+            elif server_tool == "forget_all":
+                items = args.get("items")
+                if (not isinstance(items, list) or not items
+                        or len(items) > _MIRROR_SYNC_BATCH_CAP):
+                    return []
+                ids = [str((item or {}).get("id") or "") for item in items]
+            else:
+                return []
+            plans: list[tuple[str, str]] = []
+            for node_id in ids:
+                if not node_id:
+                    continue
+                raw = _StdioServer.result_text(self._call("recall", {"id": node_id}))
+                node = (json.loads(raw) or {}).get("node") if raw else None
+                target = self._classify_mirror_node(node)
+                if target and node is not None:
+                    plans.append((target, str(node.get("description") or "")))
+            return plans
+        except Exception:
+            return []
+
+    def _apply_forget_sync(self, plans: list[tuple[str, str]],
+                           hermes_home: str) -> list[dict[str, Any]]:
+        """Carry out the planned file-side removals. Per-plan containment: a
+        failed removal is reported as a note, never raised into the tool result,
+        and never blocks the (already committed) forget."""
+        notes: list[dict[str, Any]] = []
+        for target, description in plans:
+            note: dict[str, Any] = {"target": target, "status": "failed", "detail": ""}
+            try:
+                note = self._remove_file_entry(target, description, hermes_home)
+            except Exception as exc:
+                note["detail"] = f"{type(exc).__name__}: {exc}"[:200]
+            notes.append(note)
+        return notes
+
+    def _remove_file_entry(self, target: str, description: str,
+                           hermes_home: str) -> dict[str, Any]:
+        """One mirror's file-side half, in three guarded steps: resolve the
+        entry the mirror content selects; REFUSE unless it still folds-equal to
+        the mirror's description (stale mirror / edited entry = no deletion);
+        then remove it with the native store's lock + re-read + unique-match
+        semantics. The HERMES_HOME override pins the profile's memories dir on
+        multiplexed hosts (the dispatch thread carries no profile context)."""
+        if not description.strip():
+            return {"target": target, "status": "failed",
+                    "detail": "mirror node carries no content to match"}
+        from hermes_constants import (reset_hermes_home_override,
+                                      set_hermes_home_override)
+        token = set_hermes_home_override(hermes_home)
+        try:
+            from tools.memory_tool import load_on_disk_store
+            store = load_on_disk_store()
+            if not store.target_enabled(target):
+                return {"target": target, "status": "skipped",
+                        "detail": "store disabled in memory config"}
+            resolved = store.resolve_entry(target, description, "remove")
+            if not isinstance(resolved, dict) or not resolved.get("success"):
+                detail = str((resolved or {}).get("error") or "")[:200] \
+                    if isinstance(resolved, dict) else "resolve_entry failed"
+                return {"target": target, "status": "refused", "detail": detail}
+            entry = str(resolved.get("matched_entry") or "")
+            if not entry or _fold_for_match(entry) != _fold_for_match(description):
+                return {"target": target, "status": "refused",
+                        "detail": "file entry diverged from the mirror content; nothing removed"}
+            outcome = store.remove(target, description)
+            if isinstance(outcome, dict) and outcome.get("success"):
+                return {"target": target, "status": "removed",
+                        "file": "USER.md" if target == "user" else "MEMORY.md"}
+            return {"target": target, "status": "failed",
+                    "detail": str((outcome or {}).get("error") or "")[:200]}
+        finally:
+            reset_hermes_home_override(token)
+
     # -- tools -----------------------------------------------------------------
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
@@ -620,15 +758,34 @@ class MemorywebMemoryProvider(MemoryProvider):
         if not tool_name.startswith(TOOL_PREFIX):
             return json.dumps({"error": f"unknown tool {tool_name}"})
         server_tool = tool_name[len(TOOL_PREFIX):]
+        # Plan the forget-mirror sync BEFORE the dispatch (iss #15): recall
+        # only reaches live nodes, and the forget about to run archives them.
+        sync_plans = (self._plan_forget_sync(server_tool, args)
+                      if server_tool in _FORGET_TOOLS else [])
         try:
             result = self._call(server_tool, args)
-            text = _StdioServer.result_text(result)
-            try:
-                return json.dumps({"result": json.loads(text)}, ensure_ascii=False)
-            except (json.JSONDecodeError, TypeError):
-                return json.dumps({"result": text}, ensure_ascii=False)
         except Exception as exc:
             return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        text = _StdioServer.result_text(result)
+        reply: dict[str, Any] = {}
+        try:
+            reply["result"] = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            reply["result"] = text
+        if sync_plans:
+            if self._agent_context == "primary":
+                reply["mirror_sync"] = self._apply_forget_sync(
+                    sync_plans, str(kwargs.get("hermes_home") or self._hermes_home))
+            else:
+                # Unattended contexts (review forks, cron) must not delete
+                # file-store memory — the same posture as the host's own
+                # background delete gate. The graph forget stands; the file
+                # entry stays and the note says so.
+                reply["mirror_sync"] = [
+                    {"target": target, "status": "skipped",
+                     "detail": f"non-primary context ({self._agent_context})"}
+                    for target, _ in sync_plans]
+        return json.dumps(reply, ensure_ascii=False)
 
 
 # ── Background-review prompt override ────────────────────────────────────────
