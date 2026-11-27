@@ -97,7 +97,13 @@ live `memoryweb_*` tools through the provider tool surface, a domain snapshot
 in the system prompt, background semantic recall between turns, built-in
 memory-tool writes mirrored into the graph via `on_memory_write`, transient
 session traces via `sync_turn`, and fail-closed pre-compression checkpoints
-(`compression.checkpoint_required: true` supported). Both modules install and
+(`compression.checkpoint_required: true` supported). The mirror is
+bidirectional: forgetting a `builtin-mirror` graph node through the provider's
+own `memoryweb_forget` / `memoryweb_forget_all` tools also removes the
+MEMORY.md / USER.md entry it documented — through the native store's own
+remove semantics (resolve + typography-fold compare first, so a stale mirror
+is refused rather than deleting a diverged entry; primary contexts only,
+plain graph nodes never touch the files). Both modules install and
 update together — `hermes plugins update memoryweb` refreshes the provider
 code in place, because it lives at the repository root next to the portable
 manifest.
@@ -221,6 +227,15 @@ production data — and are reproducible with any CPython 3.9+ and the memoryweb
 ```bash
 python3 tests/make_demo_db.py --db /tmp/demo.db      # build the fixture
 python3 tests/mcp_min_client.py memoryweb domains '{"action":"list"}'
+```
+
+The provider surfaces have dedicated probes (run inside a Hermes environment,
+the runtime's python, with the `memoryweb` binary available — both build their
+own throwaway home/database and touch no production data):
+
+```bash
+PYTHONPATH=<hermes runtime checkout> python3 tests/provider_probe.py        # every ABC surface
+PYTHONPATH=<hermes runtime checkout> python3 tests/forget_mirror_probe.py   # forget->file sync (iss #15)
 ```
 
 Inside a stock `nousresearch/hermes-agent` container with `memoryweb` on `PATH`:
